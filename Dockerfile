@@ -31,7 +31,10 @@ COPY demo/entrypoint.sh /entrypoint.sh
 RUN chmod 755 /entrypoint.sh
 USER node
 EXPOSE 3000
+# PORT defaults to 3000 so a run that does not set it (the CI demo job) is still healthy.
+# Compose passes PORT and overrides this. The shell form expands it; EXPOSE does not, so it stays 3000.
+ENV PORT=3000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s \
-  CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null || exit 1
+  CMD wget -qO- http://127.0.0.1:${PORT}/healthz >/dev/null || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "demo/server.ts"]
