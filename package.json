@@ -18,6 +18,6 @@
   "engines": {
     "node": ">=22.18.0"
   },
-  "license": "BUSL-1.1",
+  "license": "MIT",
   "author": "Iya CyberSecurity Solutions, LLC"
 }

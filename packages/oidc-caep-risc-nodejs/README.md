@@ -14,7 +14,7 @@ It speaks no web framework. The calls take and return plain values, so it fits E
 
 ## License
 
-Business Source License 1.1. See [LICENSE](LICENSE). Production use requires a commercial license from Iya CyberSecurity Solutions, LLC, granted only as part of a paid support subscription.
+MIT © 2026 Iya CyberSecurity Solutions, LLC. See [LICENSE](LICENSE).
 
 ## Quick look
 

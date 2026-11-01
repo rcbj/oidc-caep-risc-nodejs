@@ -51,4 +51,4 @@ or **Settings → Pages → Source: GitHub Actions**. The site is then published
 
 ## License
 
-Business Source License 1.1. Licensed Work: oidc-caep-risc-nodejs 0.1 and later. Licensor: Iya CyberSecurity Solutions, LLC. Additional Use Grant: None. Change License: MIT, four years after publication.
+MIT © 2026 Iya CyberSecurity Solutions, LLC.
