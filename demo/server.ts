@@ -39,6 +39,7 @@ import {
   EVENT, OidcError, RelyingParty, SignalsReceiver, resolveConfig, trackedFromLogin,
   type OidcLogin, type SignalEvent, type Transaction,
 } from 'oidc-caep-risc-nodejs';
+import { onPort } from '../scripts/redirects.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -78,6 +79,11 @@ async function loadRelyingParty(): Promise<RelyingParty> {
     raw.metadataFile = process.env.OIDC_METADATA_FILE;
     delete raw.metadataUrl;
     delete raw.issuer;
+  }
+  // A loopback redirect follows the port this process listens on, which is the URI configure-iya-sts
+  // registers. A public redirect is left as written.
+  for (const key of ['redirectUri', 'redirect_uri', 'postLogoutRedirectUri', 'post_logout_redirect_uri']) {
+    if (typeof raw[key] === 'string' && raw[key]) raw[key] = onPort(raw[key], PORT);
   }
   return RelyingParty.create(resolveConfig(raw, dirname(CONFIG)));
 }

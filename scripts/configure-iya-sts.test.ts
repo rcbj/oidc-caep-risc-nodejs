@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { GRANTS, MULTIPLE_ACCOUNTS, SSF_ROLES, filesOf, parseArgs, planFor, realmOf, userAttributes } from './configure-iya-sts.ts';
+import { demoPort, redirectsFor } from './redirects.mjs';
 import { fetchTrustChain, saveTrustChain, trustPath } from './trust-chain.mjs';
 
 describe('configure-iya-sts', () => {
@@ -80,11 +81,37 @@ describe('configure-iya-sts', () => {
     const args = parseArgs(['--idp', 'https://idp.test/', '--public-url', 'http://app.test/', '--no-test-user', '--dry-run'], {});
     assert.equal(args.idp, 'https://idp.test');
     assert.equal(args.publicUrl, 'http://app.test');
+    assert.equal(args.publicUrlGiven, true);
+    assert.equal(parseArgs([], {}).publicUrlGiven, false);
+    assert.equal(parseArgs([], { PUBLIC_URL: 'http://demo.test' }).publicUrlGiven, true);
     assert.equal(args.testUser, '');
     assert.equal(args.dryRun, true);
     assert.equal(args.config.endsWith('/demo/oidc.json'), true);
     assert.throws(() => parseArgs(['--idp', 'http://idp.test'], {}), /https/);
     assert.throws(() => parseArgs(['--bogus'], {}), /Unknown argument/);
+  });
+
+  it('registers a loopback redirect on the port the demo listens on', () => {
+    const file = { redirectUri: 'http://localhost:3000/callback', postLogoutRedirectUri: 'http://localhost:3000/' };
+    const moved = redirectsFor(file.redirectUri, file.postLogoutRedirectUri, { publicUrlGiven: false, port: 3001 });
+    assert.equal(moved.redirectUri, 'http://localhost:3001/callback');
+    assert.equal(moved.postLogoutRedirectUri, 'http://localhost:3001/');
+    const published = redirectsFor('https://app.example/callback', 'https://app.example/', { publicUrlGiven: false, port: 3001 });
+    assert.equal(published.redirectUri, 'https://app.example/callback');
+    const explicit = redirectsFor(file.redirectUri, file.postLogoutRedirectUri, { publicUrl: 'http://app.test:9', publicUrlGiven: true, port: 3001 });
+    assert.equal(explicit.redirectUri, 'http://app.test:9/callback');
+    assert.equal(explicit.postLogoutRedirectUri, 'http://app.test:9/');
+    assert.equal(demoPort('3000', '3001'), 3001);
+    assert.equal(demoPort('3001', ''), 3001);
+    assert.equal(demoPort('', undefined), undefined);
+    assert.equal(demoPort('nope', undefined), undefined);
+    const files = filesOf(config, 'http://localhost:3000');
+    const redirects = redirectsFor(files.redirectUri, files.postLogoutRedirectUri, { publicUrlGiven: false, port: 3001 });
+    files.redirectUri = redirects.redirectUri;
+    files.postLogoutRedirectUri = redirects.postLogoutRedirectUri;
+    const body = planFor(files, 'https://localhost:8081', '', 's3cret').find((call) => call.when === 'create')?.body as { fields: { oauthRedirectUri: string[]; oauthPostLogoutRedirectUri: string[] } };
+    assert.deepEqual(body.fields.oauthRedirectUri, ['http://localhost:3001/callback']);
+    assert.deepEqual(body.fields.oauthPostLogoutRedirectUri, ['http://localhost:3001/']);
   });
 
   it('saves the published listener CA trust chain, and the handshake when that document is absent', async () => {

@@ -19,8 +19,8 @@ The application id is the file's `client_id` (`oidc-caep-risc-demo`). The protoc
 
 | Field | Value |
 |---|---|
-| `oauthRedirectUri` | the file's `redirectUri` (`http://localhost:3000/callback`) |
-| `oauthPostLogoutRedirectUri` | the file's `postLogoutRedirectUri` |
+| `oauthRedirectUri` | the file's `redirectUri`. A loopback URI is registered on the port the demo is listening on |
+| `oauthPostLogoutRedirectUri` | the file's `postLogoutRedirectUri`, moved the same way |
 | `oauthResponseType` | `code` |
 | `oauthGrantType` | `authorization_code`, `refresh_token`, `client_credentials` |
 | `oauthAllowedScope` | the file's scopes, the same string oidc-caep-client uses |
@@ -57,5 +57,5 @@ The script prints the trust anchor's SHA-256 fingerprint. Compare it with the Ro
 |---|---|
 | `--config` | Default `demo/oidc.json`. |
 | `--idp` | iya-sts's base, or `/realm/<id>` for a trust realm. Default: the origin of `metadataUrl`, or `IYA_STS_URL`. |
-| `--public-url` | Used only when the file has no redirect URI. The file's URIs win. |
+| `--public-url` | Replaces the origin of the redirect URIs and keeps their paths. Without it, a loopback redirect follows the running demo's `PORT`, then `$PORT`. |
 | `--dry-run` | Print the calls. Nothing is sent, and no secret is written. |

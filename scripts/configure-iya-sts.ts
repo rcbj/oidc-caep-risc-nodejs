@@ -23,11 +23,13 @@
  * ADMIN_API_CLIENT_SECRET or STS_ADMIN_API_CLIENT_SECRET.
  */
 
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { send } from '../packages/oidc-caep-risc-nodejs/src/http.ts';
+import { demoPort, redirectsFor } from './redirects.mjs';
 import { saveTrustChain, trustPath } from './trust-chain.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,8 +51,9 @@ export function usage(): string {
   --config        The demo's OpenID Connect configuration (default: demo/oidc.json)
   --idp           iya-sts's base URL; the realm's, e.g. https://host/realm/acme, for a trust realm
                   (default: the origin of the configuration's metadataUrl, or $IYA_STS_URL)
-  --public-url    Used only when the file has no redirect URI: <public-url>/callback
-                  (default: $PUBLIC_URL or http://localhost:3000). The file's redirect URIs win.
+  --public-url    Replace the origin of the file's redirect URIs with this URL, and keep their paths
+                  (default: unset; $PUBLIC_URL). Without it, a loopback redirect follows the
+                  running demo's PORT, then $PORT. A non-loopback redirect is left as written.
   --test-user     The test user to create (default: oidc-demo-user). Its password is
                   $OIDC_DEMO_USER_PASSWORD, or one is generated and printed once. With that variable
                   set, an existing user's password is replaced.
@@ -64,6 +67,8 @@ export interface Args {
   config: string;
   idp: string;
   publicUrl: string;
+  /** Set when --public-url or PUBLIC_URL was given. The default does not count. */
+  publicUrlGiven: boolean;
   testUser: string;
   dryRun: boolean;
   help: boolean;
@@ -76,6 +81,7 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
     config: resolve(repoRoot, 'demo/oidc.json'),
     idp: (env.IYA_STS_URL || '').replace(/\/+$/, ''),
     publicUrl: (env.PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, ''),
+    publicUrlGiven: Boolean(env.PUBLIC_URL),
     testUser: 'oidc-demo-user',
     dryRun: false,
     help: false,
@@ -93,7 +99,10 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
     else if (arg === '--idp') {
       out.idp = value().replace(/\/+$/, '');
       out.idpGiven = true;
-    } else if (arg === '--public-url') out.publicUrl = value().replace(/\/+$/, '');
+    } else if (arg === '--public-url') {
+      out.publicUrl = value().replace(/\/+$/, '');
+      out.publicUrlGiven = true;
+    }
     else if (arg === '--test-user') out.testUser = value().trim();
     else if (arg === '--no-test-user') out.testUser = '';
     else if (arg === '--dry-run') out.dryRun = true;
@@ -119,7 +128,7 @@ export interface DemoFiles {
   ssfTransmitter?: string;
 }
 
-/** The files and the client the configuration names. Redirect URIs in the file win over publicUrl. */
+/** The files and the client the configuration names. Registration then applies {@link redirectsFor}. */
 export function filesOf(configPath: string, publicUrl: string): DemoFiles {
   const raw = JSON.parse(readFileSync(configPath, 'utf8')) as {
     client_id?: string;
@@ -311,6 +320,22 @@ function writeSecret(path: string, secret: string): void {
   chmodSync(path, 0o600);
 }
 
+/** PORT from the running oidc-demo container, when compose has one. Docker being absent is not an error. */
+export function containerPort(cwd = repoRoot): string | undefined {
+  try {
+    const id = execFileSync('docker', ['compose', 'ps', '-q', 'oidc-demo'], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim().split('\n')[0];
+    if (!id) return undefined;
+    const env = execFileSync('docker', ['inspect', '-f', '{{range .Config.Env}}{{println .}}{{end}}', id], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return env.split('\n').find((line) => line.startsWith('PORT='))?.slice('PORT='.length);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
   const args = parseArgs(argv);
   if (args.help) {
@@ -318,6 +343,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     return;
   }
   const files = filesOf(args.config, args.publicUrl);
+  const port = demoPort(process.env.PORT, containerPort());
+  const redirects = redirectsFor(files.redirectUri, files.postLogoutRedirectUri, {
+    publicUrl: args.publicUrl, publicUrlGiven: args.publicUrlGiven, port,
+  });
+  files.redirectUri = redirects.redirectUri;
+  files.postLogoutRedirectUri = redirects.postLogoutRedirectUri;
   const idp = args.idp || new URL(files.metadataUrl).origin;
   const { origin, base } = realmOf(idp);
 

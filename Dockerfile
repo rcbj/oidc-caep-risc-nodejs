@@ -26,7 +26,7 @@ RUN npm ci --omit=dev --workspaces --include-workspace-root --ignore-scripts && 
 COPY --from=build /src/packages/oidc-caep-risc-nodejs/dist packages/oidc-caep-risc-nodejs/dist
 COPY demo/server.ts demo/oidc.json demo/
 COPY demo/public demo/public
-COPY scripts/trust-chain.mjs scripts/trust-chain.mjs
+COPY scripts/trust-chain.mjs scripts/redirects.mjs scripts/
 COPY demo/entrypoint.sh /entrypoint.sh
 RUN chmod 755 /entrypoint.sh
 USER node
