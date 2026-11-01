@@ -1,0 +1,16 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "oidc-caep-risc-nodejs",
+  "entryPoints": ["../../packages/oidc-caep-risc-nodejs/src/index.ts"],
+  "tsconfig": "tsconfig.json",
+  "out": "../../_site_api/api",
+  "readme": "none",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "sort": ["kind", "alphabetical"],
+  "githubPages": false,
+  "navigationLinks": {
+    "Documentation": "https://rcbj.github.io/oidc-caep-risc-nodejs/",
+    "GitHub": "https://github.com/rcbj/oidc-caep-risc-nodejs"
+  }
+}

@@ -1,0 +1,169 @@
+# Builds, tests and publishes packages/oidc-caep-risc-nodejs to npmjs.com.
+#
+# THE VERSION (scripts/version.mjs): M.N from the VERSION file, and a patch
+# number worked out from what is already on npm:
+#   - main publishes a release, M.N.P;
+#   - develop publishes a pre-release of the release that comes next, M.N.P-next.R.
+# The committed package.json says M.N.0; `--set` writes the real version into
+# the workspace copy just before packing.
+#
+# WHEN IT PUBLISHES:
+#   - a push to main publishes a release under the npm dist-tag `latest`;
+#   - a push to develop publishes a pre-release under `next`;
+#   - a pull request builds, tests and packs, and publishes nothing;
+#   - Run workflow publishes on the channel chosen.
+# Only a change to the package, VERSION, the versioner, the lock file or this
+# workflow publishes.
+#
+# AUTHENTICATION. The publish job can use either of two credentials:
+#   - npm trusted publishing (OIDC): no secret. Configure it once the package exists.
+#   - The repository secret NPM_TOKEN. The first publish needs this.
+# The package is published with provenance (`--provenance`).
+name: Publish the npm package
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - packages/oidc-caep-risc-nodejs/**
+      - VERSION
+      - package-lock.json
+      - scripts/version.mjs
+      - .github/workflows/npm-publish.yml
+  pull_request:
+    paths:
+      - packages/oidc-caep-risc-nodejs/**
+      - VERSION
+      - package-lock.json
+      - scripts/version.mjs
+      - .github/workflows/npm-publish.yml
+  workflow_dispatch:
+    inputs:
+      dist-tag:
+        description: npm dist-tag to publish under
+        type: choice
+        options: [latest, next]
+        default: latest
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.stamp.outputs.version }}
+      channel: ${{ steps.channel.outputs.channel }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Check the manifests follow VERSION
+        run: node scripts/version.mjs --check-manifests
+
+      - name: Choose the channel
+        id: channel
+        run: |
+          case "${GITHUB_EVENT_NAME}:${GITHUB_REF_NAME}" in
+            workflow_dispatch:*) CHANNEL="${{ inputs.dist-tag }}" ;;
+            push:main)           CHANNEL=latest ;;
+            *)                   CHANNEL=next ;;
+          esac
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp the version
+        id: stamp
+        run: |
+          VERSION="$(node scripts/version.mjs --set packages/oidc-caep-risc-nodejs --channel '${{ steps.channel.outputs.channel }}')"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "### oidc-caep-risc-nodejs ${VERSION} (${{ steps.channel.outputs.channel }})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pack
+        id: pack
+        working-directory: packages/oidc-caep-risc-nodejs
+        run: |
+          TARBALL="$(npm pack --silent)"
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          tar -tzf "${TARBALL}" | sed 's/^/  /'
+          tar -tzf "${TARBALL}" | grep -q '^package/dist/index.js$' || { echo "dist/index.js is not in the package" >&2; exit 1; }
+          tar -tzf "${TARBALL}" | grep -q '^package/dist/index.d.ts$' || { echo "dist/index.d.ts is not in the package" >&2; exit 1; }
+          if tar -tzf "${TARBALL}" | grep '\.ts$' | grep -v '\.d\.ts$' | grep -q .; then echo "a .ts source is in the package" >&2; exit 1; fi
+          mkdir -p /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null && npm pkg set type=module
+          npm install --no-audit --no-fund "${GITHUB_WORKSPACE}/packages/oidc-caep-risc-nodejs/${TARBALL}"
+          node --input-type=module -e "import * as m from 'oidc-caep-risc-nodejs'; for (const n of ['RelyingParty','OidcError','SignalsReceiver']) if (!m[n]) throw new Error(n + ' is not exported'); console.log('esm ok');"
+          node -e "const m = require('oidc-caep-risc-nodejs'); if (!m.RelyingParty) throw new Error('require() failed'); console.log('cjs ok');"
+          npx --no-install oidc-caep-risc-nodejs help > cli.txt
+          grep -q check cli.txt || { echo "the oidc-caep-risc-nodejs command printed no usage:" >&2; cat cli.txt >&2; exit 1; }
+          echo "cli ok"
+          printf '%s\n' "import { RelyingParty, type OidcLogin } from 'oidc-caep-risc-nodejs';" \
+            "export async function f(rp: RelyingParty): Promise<OidcLogin> { return rp.complete(new URLSearchParams(), { state: '', nonce: '', codeVerifier: '', redirectUri: 'https://app.example/callback' }); }" > check.ts
+          printf '%s' '{"compilerOptions":{"noEmit":true,"strict":true,"module":"NodeNext","moduleResolution":"NodeNext","target":"ES2022","skipLibCheck":false,"types":["node"]},"files":["check.ts"]}' > tsconfig.json
+          npm install --no-audit --no-fund @types/node@24 >/dev/null
+          "${GITHUB_WORKSPACE}/node_modules/.bin/tsc" -p tsconfig.json && echo "types ok"
+
+      - name: Upload the tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: packages/oidc-caep-risc-nodejs/${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/oidc-caep-risc-nodejs/v/${{ needs.build.outputs.version }}
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+          registry-url: https://registry.npmjs.org
+
+      - name: Download the tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+
+      - name: Choose the dist-tag
+        id: tag
+        run: echo "dist_tag=${{ needs.build.outputs.channel }}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish "${{ needs.build.outputs.tarball }}" \
+            --access public --provenance --tag "${{ steps.tag.outputs.dist_tag }}"
+          echo "Published oidc-caep-risc-nodejs@${{ needs.build.outputs.version }} as ${{ steps.tag.outputs.dist_tag }}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tag the commit
+        run: |
+          git tag "v${{ needs.build.outputs.version }}" "${GITHUB_SHA}"
+          git push origin "v${{ needs.build.outputs.version }}"

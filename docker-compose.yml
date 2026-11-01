@@ -1,0 +1,13 @@
+services:
+  oidc-demo:
+    build: .
+    image: oidc-caep-risc-nodejs-demo
+    # The host's network, so that https://localhost:8081 (the provider, and the Shared Signals
+    # transmitter this server polls) is the same address inside the container as in the browser.
+    # On Docker Desktop, turn on host networking (Settings → Resources → Network).
+    network_mode: host
+    environment:
+      PORT: ${PORT:-3000}
+    volumes:
+      - ./demo/generated:/app/demo/generated:ro
+    stop_grace_period: 5s

@@ -1,0 +1,19 @@
+# Jekyll configuration for the oidc-caep-risc-nodejs documentation site, laid out like the other
+# protocol libraries: the minima theme GitHub Pages ships, with a sidebar from _data/navigation.yml.
+# ../.github/workflows/pages.yml builds it. The guide and the signals page are the package's own
+# files (packages/oidc-caep-risc-nodejs/docs/), copied in by the workflow.
+title: oidc-caep-risc-nodejs
+tagline: documentation
+description: >-
+  A confidential OpenID Connect client for server-side Node.js: Authorization Code with PKCE,
+  client authentication, and a CAEP and RISC Shared Signals receiver.
+theme: minima
+show_excerpts: false
+baseurl: "/oidc-caep-risc-nodejs"
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+plugins:
+  - jekyll-relative-links

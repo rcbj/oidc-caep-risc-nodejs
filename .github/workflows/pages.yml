@@ -1,0 +1,125 @@
+# Builds the documentation as a Jekyll site and deploys it to GitHub Pages.
+#
+# WHAT THE SITE IS MADE OF. docs/ is the frame and its pages. Two documents are the package's own files,
+# written once and read in the repository and on npm as well:
+#
+#   packages/oidc-caep-risc-nodejs/docs/guide.md    ->  guide.html
+#   packages/oidc-caep-risc-nodejs/docs/signals.md  ->  signals.html
+#   packages/oidc-caep-risc-nodejs/README.md        ->  reference.html
+#
+# Their links that leave the package are rewritten in a staging copy: to the page beside them, or to the
+# file on GitHub at the commit being built. A guard fails the build if any `](../` link is left. The
+# TypeDoc reference is generated from the TypeScript sources at /api/.
+#
+# BEFORE THE FIRST RUN, Pages must exist and build from GitHub Actions (the workflow's token cannot create it):
+#
+#     gh api -X POST repos/rcbj/oidc-caep-risc-nodejs/pages -f build_type=workflow
+name: Deploy docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - packages/oidc-caep-risc-nodejs/README.md
+      - packages/oidc-caep-risc-nodejs/docs/**
+      - packages/oidc-caep-risc-nodejs/src/**
+      - tools/apidocs/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+        with:
+          enablement: true
+
+      - name: Stage the site
+        env:
+          BLOB: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.sha }}
+        run: |
+          set -euo pipefail
+          rm -rf _site_src
+          cp -r docs _site_src
+          {
+            printf -- '---\ntitle: Server-side guide\n---\n\n'
+            sed -e 's#](\.\./README\.md#](reference.md#g' \
+                -e "s#](\.\./\.\./\.\./#](${BLOB}/#g" packages/oidc-caep-risc-nodejs/docs/guide.md
+          } > _site_src/guide.md
+          {
+            printf -- '---\ntitle: Handling CAEP and RISC events\n---\n\n'
+            sed -e 's#](\.\./README\.md#](reference.md#g' \
+                -e "s#](\.\./\.\./\.\./#](${BLOB}/#g" packages/oidc-caep-risc-nodejs/docs/signals.md
+          } > _site_src/signals.md
+          {
+            printf -- '---\ntitle: Configuration and API reference\n---\n\n'
+            sed -e 's#](docs/guide\.md#](guide.md#g' \
+                -e 's#](docs/signals\.md#](signals.md#g' \
+                -e "s#](LICENSE)#](${BLOB}/packages/oidc-caep-risc-nodejs/LICENSE)#g" \
+                packages/oidc-caep-risc-nodejs/README.md
+          } > _site_src/reference.md
+          if grep -nE '\]\(\.\./' _site_src/*.md; then
+            echo "A link above points outside the site; rewrite it in this step." >&2
+            exit 1
+          fi
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./_site_src
+          destination: ./_site
+
+      - name: Check the site
+        run: |
+          for page in index.html guide.html signals.html reference.html configure.html demo.html development.html; do
+            [ -f "_site/$page" ] || { echo "_site/$page is missing." >&2; ls -la _site || true; exit 1; }
+          done
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.1'
+
+      # TypeDoc type-checks the sources, so the workspace (and jose) is installed first.
+      - name: Install the workspace
+        run: npm ci --no-audit --no-fund
+
+      # TypeDoc runs on TypeScript 6 (the library builds with 7, the native compiler, which has no JavaScript
+      # API for TypeDoc to call), so it is a package of its own, outside the workspace.
+      - name: Generate the TypeScript API reference
+        working-directory: tools/apidocs
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Add it to the site
+        run: |
+          [ -f _site_api/api/index.html ] || { echo "_site_api/api/index.html is missing." >&2; exit 1; }
+          sudo mkdir -p _site/api
+          sudo cp -r _site_api/api/. _site/api/
+
+      - uses: actions/upload-pages-artifact@v5
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,8 @@
+node_modules/
+packages/oidc-caep-risc-nodejs/dist/
+_site_api/
+_site_src/
+_site/
+# The demo's client secret, the IdP's TLS root, and an optional offline metadata file.
+demo/generated/
+*.tgz
