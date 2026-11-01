@@ -49,6 +49,11 @@ export interface OidcConfigFile {
    * iya-sts publishes this bundle at `GET /tls/server-certificate` (leaf, intermediates, and the root).
    */
   tlsCa?: string;
+  /**
+   * CAEP and RISC. Omitted or true keeps them on. false does not resolve `ssf`, does not contact a
+   * transmitter, and drops `ssf.read` and `ssf.manage` from the scopes.
+   */
+  signals?: boolean;
   ssf?: { transmitter?: string; pollIntervalMs?: number };
 }
 
@@ -71,6 +76,8 @@ export interface ResolvedConfig {
   maxIdTokenAgeSec: number;
   allowInsecure: boolean;
   tlsCa?: string;
+  /** Set only when CAEP and RISC are off. Omitted means on. */
+  signals?: false;
   ssf?: { transmitter: string; pollIntervalMs?: number };
 }
 
@@ -125,6 +132,13 @@ function readTrust(raw: string | undefined, baseDir: string): string | undefined
   }
 }
 
+/** Omitted and true keep CAEP and RISC on. Any other value is a configuration error. */
+function signalsOn(value: unknown): boolean {
+  if (value === undefined || value === true) return true;
+  if (value === false) return false;
+  throw new OidcError('config', 'signals must be true or false');
+}
+
 function isLoopback(url: URL): boolean {
   return url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
 }
@@ -158,9 +172,12 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
   const redirectUri = String(doc.redirectUri ?? doc.redirect_uri ?? '').trim();
   if (!redirectUri) throw new OidcError('config', 'redirectUri is required');
   const allowInsecure = doc.allowInsecure === true;
-  const scopes = Array.isArray(doc.scopes)
+  const signals = signalsOn(doc.signals);
+  let scopes = Array.isArray(doc.scopes)
     ? doc.scopes.map((s) => String(s).trim()).filter(Boolean).join(' ')
     : String(doc.scopes ?? DEFAULT_SCOPES).trim();
+  // Drop the Shared Signals scopes after the default is applied. DEFAULT_SCOPES itself stays as it is.
+  if (!signals) scopes = scopes.split(/\s+/).filter((scope) => scope !== 'ssf.read' && scope !== 'ssf.manage').join(' ');
   if (!scopes.split(/\s+/).includes('openid')) throw new OidcError('config', 'scopes must include openid');
   const par = doc.par ?? 'auto';
   if (par !== 'auto' && par !== 'always' && par !== 'never') throw new OidcError('config', 'par must be auto, always, or never');
@@ -200,7 +217,7 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
 
   const postLogout = String(doc.postLogoutRedirectUri ?? doc.post_logout_redirect_uri ?? '').trim();
   let ssf: ResolvedConfig['ssf'];
-  if (doc.ssf?.transmitter) {
+  if (signals && doc.ssf?.transmitter) {
     const transmitter = doc.ssf.transmitter.replace(/\/+$/, '');
     if (!/^https?:\/\//.test(transmitter)) throw new OidcError('config', 'ssf.transmitter must be an http(s) URL');
     ssf = { transmitter, ...(doc.ssf.pollIntervalMs ? { pollIntervalMs: doc.ssf.pollIntervalMs } : {}) };
@@ -224,6 +241,7 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
     maxIdTokenAgeSec: doc.maxIdTokenAgeSec ?? 600,
     allowInsecure,
     ...(tlsCa ? { tlsCa } : {}),
+    ...(signals ? {} : { signals: false as const }),
     ...(ssf ? { ssf } : {}),
   };
 }

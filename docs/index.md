@@ -8,9 +8,9 @@ A **confidential OpenID Connect client** for **server-side** Node.js application
 
 - **Authorization Code with PKCE**, always S256. The browser carries a code. Tokens stay in the server.
 - **Client authentication** at the token endpoint: `client_secret_basic` (the default), `client_secret_post`, or `private_key_jwt`. A public client (`none`) is refused.
-- **The same discovery document and the same scopes** as [oidc-caep-client](https://github.com/rcbj/oidc-caep-client): `openid profile email offline_access ssf.read ssf.manage`. That project is a browser application. This one is not.
+- **The same discovery document and the same default scopes** as [oidc-caep-client](https://github.com/rcbj/oidc-caep-client): `openid profile email offline_access ssf.read ssf.manage`. That project is a browser application. This one is not. `signals: false` removes `ssf.read` and `ssf.manage` from the authorization request.
 - **ID tokens checked** against the provider's JWKS: issuer, audience, nonce, age, `at_hash` and `c_hash`, and a signature algorithm the provider actually advertises.
-- **CAEP and RISC** on one Shared Signals poll stream, authenticated with the application's own client-credentials token (`ssf.manage`).
+- **CAEP and RISC** on one Shared Signals poll stream, authenticated with the application's own client-credentials token (`ssf.manage`). The default is on. `signals: false` turns CAEP and RISC off, drops those two scopes, and does not contact a transmitter.
 
 It is TypeScript and works from JavaScript, needs no web framework, and depends on [`jose`](https://github.com/panva/jose) only. It is built and tested against [iya-sts](https://rcbj.github.io/iya-sts/).
 

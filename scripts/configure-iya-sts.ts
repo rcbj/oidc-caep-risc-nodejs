@@ -11,9 +11,10 @@
  *      code, grants authorization_code, refresh_token and client_credentials, the scopes from the
  *      configuration file, and token endpoint authentication client_secret_basic. No browser origin is
  *      registered: this client is a server, not a page;
- *   4. membership of SSF_READ and SSF_MANAGE for whichever of ssf.read and ssf.manage the scopes name,
- *      and authn.multipleAccounts so one browser can hold several people;
- *   5. a test user, oidc-demo-user, in the groups ssf-read and ssf-manage.
+ *   4. membership of SSF_READ and SSF_MANAGE for whichever of ssf.read and ssf.manage the scopes name.
+ *      signals: false ignores those two scopes, so those roles are not registered and the test user
+ *      is not put in those groups. No transmitter is registered. authn.multipleAccounts is set either way;
+ *   5. a test user, oidc-demo-user, in ssf-read and ssf-manage when those scopes are in use.
  *
  *   ADMIN_API_CLIENT_SECRET=… node scripts/configure-iya-sts.ts
  *   node scripts/configure-iya-sts.ts --config demo/oidc.json --dry-run
@@ -142,6 +143,7 @@ export function filesOf(configPath: string, publicUrl: string): DemoFiles {
     tokenEndpointAuthMethod?: string;
     metadataUrl?: string;
     tlsCa?: string;
+    signals?: unknown;
     ssf?: { transmitter?: string };
   };
   const base = dirname(configPath);
@@ -158,6 +160,9 @@ export function filesOf(configPath: string, publicUrl: string): DemoFiles {
     ? raw.scopes.map((s) => String(s).trim()).filter(Boolean)
     : String(raw.scopes ?? '').trim().split(/\s+/).filter(Boolean);
   if (!scopes.includes('openid')) throw new Error(`${configPath}'s scopes must include openid`);
+  if (raw.signals !== undefined && typeof raw.signals !== 'boolean') throw new Error(`${configPath}: signals must be true or false`);
+  const signals = raw.signals !== false;
+  const used = signals ? scopes : scopes.filter((scope) => scope !== 'ssf.read' && scope !== 'ssf.manage');
   const origin = publicUrl.endsWith('/') ? publicUrl : `${publicUrl}/`;
   const redirectUri = String(raw.redirectUri ?? raw.redirect_uri ?? '').trim() || new URL('callback', origin).href;
   const postLogoutRedirectUri = String(raw.postLogoutRedirectUri ?? raw.post_logout_redirect_uri ?? '').trim() || new URL('./', origin).href;
@@ -166,12 +171,12 @@ export function filesOf(configPath: string, publicUrl: string): DemoFiles {
     clientId,
     redirectUri,
     postLogoutRedirectUri,
-    scopes,
+    scopes: used,
     tokenEndpointAuthMethod: method,
     metadataUrl,
     secretFile: at(secretRaw.slice(5)),
     ...(tlsCa ? { tlsCa } : {}),
-    ...(raw.ssf?.transmitter ? { ssfTransmitter: raw.ssf.transmitter.replace(/\/+$/, '') } : {}),
+    ...(signals && raw.ssf?.transmitter ? { ssfTransmitter: raw.ssf.transmitter.replace(/\/+$/, '') } : {}),
   };
 }
 

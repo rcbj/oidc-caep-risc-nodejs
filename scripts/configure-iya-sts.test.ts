@@ -71,6 +71,37 @@ describe('configure-iya-sts', () => {
     assert.equal(planFor(files, 'https://localhost:8081', '', 's3cret').some((call) => call.path.endsWith('/users/create')), false);
   });
 
+  it('does not register Shared Signals roles when signals is false', () => {
+    const off = join(dir, 'off.json');
+    writeFileSync(off, JSON.stringify({
+      metadataUrl: 'https://localhost:8081/.well-known/openid-configuration',
+      client_id: 'oidc-caep-risc-demo',
+      clientSecret: 'file:generated/client-secret',
+      redirectUri: 'http://localhost:3000/callback',
+      scopes: 'openid profile email offline_access ssf.read ssf.manage',
+      signals: false,
+      ssf: { transmitter: 'https://localhost:8081' },
+    }));
+    const files = filesOf(off, 'http://localhost:3000');
+    assert.deepEqual(files.scopes, ['openid', 'profile', 'email', 'offline_access']);
+    assert.equal(files.ssfTransmitter, undefined);
+    const plan = planFor(files, 'https://localhost:8081', 'oidc-demo-user', 's3cret');
+    assert.deepEqual(plan.filter((call) => call.path.endsWith('/roles/add-member')), []);
+    assert.deepEqual(plan.filter((call) => call.path.endsWith('/groups/add-member')), []);
+    const create = plan.find((call) => call.when === 'create');
+    const allowed = (create?.body as { fields: { oauthAllowedScope: string[] } }).fields.oauthAllowedScope;
+    assert.deepEqual(allowed, ['openid', 'profile', 'email', 'offline_access']);
+    writeFileSync(off, JSON.stringify({
+      metadataUrl: 'https://localhost:8081/.well-known/openid-configuration',
+      client_id: 'oidc-caep-risc-demo',
+      clientSecret: 'file:generated/client-secret',
+      redirectUri: 'http://localhost:3000/callback',
+      scopes: 'openid ssf.read ssf.manage',
+      signals: 'no',
+    }));
+    assert.throws(() => filesOf(off, 'http://localhost:3000'), /signals must be true or false/);
+  });
+
   it('keeps a realm base and refuses any other path', () => {
     assert.deepEqual(realmOf('https://idp.test/realm/acme'), { origin: 'https://idp.test', base: 'https://idp.test/realm/acme' });
     assert.throws(() => realmOf('https://idp.test/oauth2'), /realm/);

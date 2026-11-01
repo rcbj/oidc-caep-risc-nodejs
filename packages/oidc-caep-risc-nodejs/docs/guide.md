@@ -21,6 +21,8 @@ The client is confidential. The browser only ever carries an authorization code.
 
 `scopes` is the same string [oidc-caep-client](https://github.com/rcbj/oidc-caep-client) registers. `metadataUrl` is that project's name for the discovery document. `client_secret_basic` is what iya-sts writes when a client is created with a secret. `tlsCa` is the CA trust chain for the provider's TLS listener: a PEM bundle, `file:path`, `env:NAME`, or a path. iya-sts publishes that bundle at `GET /tls/server-certificate`. A missing file is ignored, so the process can still serve a page before the file exists.
 
+CAEP and RISC are on by default. `signals: false` turns them off for a provider that does not implement Shared Signals. The client then does not resolve an `ssf` block, does not contact a transmitter, and does not request `ssf.read` or `ssf.manage`. `openid` is still required. Sign-in is otherwise the same.
+
 Keep the secret out of the image and out of version control. `env:OIDC_CLIENT_SECRET` reads it from the environment. `file:keys/client-secret` reads it from a file next to the configuration.
 
 For iya-sts, [`scripts/configure-iya-sts.ts`](../../../scripts/configure-iya-sts.ts) registers the application, writes the secret, and saves the listener CA trust chain into the file `tlsCa` names. The demo container refreshes that file when it starts.
