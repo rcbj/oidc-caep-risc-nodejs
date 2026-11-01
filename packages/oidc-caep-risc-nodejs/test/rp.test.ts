@@ -357,6 +357,16 @@ describe('a confidential Authorization Code client', { concurrency: 1 }, () => {
     assert.equal(env.tokenEndpointAuthMethod, 'client_secret_basic');
     const fromFile = resolveConfig({ ...file, clientSecret: 'file:secret' }, dir);
     assert.equal(fromFile.clientSecret, 'from-file');
+    const chain = '-----BEGIN CERTIFICATE-----\nchain\n-----END CERTIFICATE-----\n';
+    writeFileSync(join(dir, 'ca.pem'), chain);
+    assert.equal(resolveConfig({ ...file, tlsCa: 'ca.pem' }, dir).tlsCa, chain);
+    assert.equal(resolveConfig({ ...file, tlsCa: 'file:ca.pem' }, dir).tlsCa, chain);
+    assert.equal(resolveConfig({ ...file, tlsCa: chain }, dir).tlsCa, chain.trim());
+    process.env.OIDC_TEST_CA = chain;
+    assert.equal(resolveConfig({ ...file, tlsCa: 'env:OIDC_TEST_CA' }, dir).tlsCa, chain);
+    delete process.env.OIDC_TEST_CA;
+    assert.equal(resolveConfig({ ...file, tlsCa: 'env:OIDC_TEST_CA' }, dir).tlsCa, undefined);
+    assert.equal(resolveConfig({ ...file, tlsCa: 'missing.pem' }, dir).tlsCa, undefined);
     assert.throws(() => resolveConfig({ ...file, tokenEndpointAuthMethod: 'none' }, dir), /public client/);
     assert.throws(() => resolveConfig({ ...file, scopes: 'profile email' }, dir), /openid/);
     delete process.env.OIDC_TEST_SECRET;

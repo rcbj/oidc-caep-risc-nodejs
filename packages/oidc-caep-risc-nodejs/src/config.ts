@@ -43,7 +43,11 @@ export interface OidcConfigFile {
   maxIdTokenAgeSec?: number;
   /** Allow an `http` issuer. Loopback `http` redirect URIs are allowed either way. Default false. */
   allowInsecure?: boolean;
-  /** PEM certificates to trust for the provider's TLS, beyond node's own store. A missing file is ignored. */
+  /**
+   * CA trust chain for the provider's TLS listener certificate, in addition to node's own store.
+   * PEM, `file:path`, `env:NAME`, or a path. A missing file is ignored.
+   * iya-sts publishes this bundle at `GET /tls/server-certificate` (leaf, intermediates, and the root).
+   */
   tlsCa?: string;
   ssf?: { transmitter?: string; pollIntervalMs?: number };
 }
@@ -102,6 +106,25 @@ function keyValue(raw: string, baseDir: string, what: string): string {
   return readPath(raw, baseDir, what);
 }
 
+/**
+ * The listener CA trust chain: PEM, `file:`, `env:`, or a path.
+ * A path that is not there yet is absent, not an error, so a process can start before setup writes it.
+ */
+function readTrust(raw: string | undefined, baseDir: string): string | undefined {
+  if (!raw) return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (value.includes('-----BEGIN')) return value;
+  if (value.startsWith('env:')) return process.env[value.slice(4)] || undefined;
+  const path = value.startsWith('file:') ? value.slice(5) : value;
+  const full = isAbsolute(path) ? path : resolve(baseDir, path);
+  try {
+    return readFileSync(full, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
 function isLoopback(url: URL): boolean {
   return url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
 }
@@ -119,8 +142,8 @@ function checkRedirect(value: string, name: string, allowInsecure: boolean): str
 }
 
 /**
- * Reads a configuration object: resolves `file:` and `env:` secrets, loads metadata and the TLS
- * root when those files exist, and fills the defaults. `baseDir` is where relative paths start.
+ * Reads a configuration object: resolves `file:` and `env:` secrets, loads metadata and the listener
+ * CA trust chain when that file exists, and fills the defaults. `baseDir` is where relative paths start.
  */
 export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
   const doc = asObject(raw);
@@ -173,15 +196,7 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
     throw new OidcError('config', 'private_key_jwt needs privateKey');
   }
 
-  let tlsCa: string | undefined;
-  if (doc.tlsCa) {
-    const full = isAbsolute(doc.tlsCa) ? doc.tlsCa : resolve(baseDir, doc.tlsCa);
-    try {
-      tlsCa = readFileSync(full, 'utf8');
-    } catch {
-      tlsCa = undefined;
-    }
-  }
+  const tlsCa = readTrust(doc.tlsCa, baseDir);
 
   const postLogout = String(doc.postLogoutRedirectUri ?? doc.post_logout_redirect_uri ?? '').trim();
   let ssf: ResolvedConfig['ssf'];

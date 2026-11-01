@@ -19,11 +19,11 @@ The client is confidential. The browser only ever carries an authorization code.
 }
 ```
 
-`scopes` is the same string [oidc-caep-client](https://github.com/rcbj/oidc-caep-client) registers. `metadataUrl` is that project's name for the discovery document. `client_secret_basic` is what iya-sts writes when a client is created with a secret. `tlsCa` is extra trust for a provider whose certificate chains to a private root; a missing file is ignored, so the process can still serve a page before the file exists.
+`scopes` is the same string [oidc-caep-client](https://github.com/rcbj/oidc-caep-client) registers. `metadataUrl` is that project's name for the discovery document. `client_secret_basic` is what iya-sts writes when a client is created with a secret. `tlsCa` is the CA trust chain for the provider's TLS listener: a PEM bundle, `file:path`, `env:NAME`, or a path. iya-sts publishes that bundle at `GET /tls/server-certificate`. A missing file is ignored, so the process can still serve a page before the file exists.
 
 Keep the secret out of the image and out of version control. `env:OIDC_CLIENT_SECRET` reads it from the environment. `file:keys/client-secret` reads it from a file next to the configuration.
 
-For iya-sts, [`scripts/configure-iya-sts.ts`](../../../scripts/configure-iya-sts.ts) registers the application, writes the secret, and saves the provider's TLS root.
+For iya-sts, [`scripts/configure-iya-sts.ts`](../../../scripts/configure-iya-sts.ts) registers the application, writes the secret, and saves the listener CA trust chain into the file `tlsCa` names. The demo container refreshes that file when it starts.
 
 ## 2. The login route
 

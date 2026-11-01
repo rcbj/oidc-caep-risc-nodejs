@@ -9,5 +9,6 @@ services:
     environment:
       PORT: ${PORT:-3000}
     volumes:
-      - ./demo/generated:/app/demo/generated:ro
+      # Read-write so the entrypoint can refresh demo/generated/idp-ca.pem, the file tlsCa names.
+      - ./demo/generated:/app/demo/generated
     stop_grace_period: 5s

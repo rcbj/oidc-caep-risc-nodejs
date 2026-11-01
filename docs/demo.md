@@ -18,7 +18,7 @@ docker compose up --build
 
 Open <http://localhost:3000> and sign in as `oidc-demo-user`.
 
-`configure-iya-sts` writes `demo/generated/client-secret` and `demo/generated/idp-ca.pem`. Compose mounts that directory into the container, read-only. The files are not in the image.
+`configure-iya-sts` writes `demo/generated/client-secret` and `demo/generated/idp-ca.pem`. That second file is the listener CA trust chain, and it is what `tlsCa` in `demo/oidc.json` names. Compose mounts the directory into the container. The files are not in the image. When the container starts, it fetches the chain again and updates that file, so a rebuilt listener certificate is picked up without a second setup run.
 
 The container uses the host's network, so `https://localhost:8081` is the same address inside the container as in the browser. On Docker Desktop, turn on host networking.
 

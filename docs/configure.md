@@ -47,7 +47,9 @@ This is a different user from oidc-caep-client's `caep-demo-user` and from saml2
 
 ## TLS
 
-If `demo/generated/idp-ca.pem` does not exist, the script takes the root from the TLS handshake, prints its fingerprint, and saves it. Compare that fingerprint with the Root CA on iya-sts's Server configuration, PKI page. Later calls trust that file. The listener certificate of a development stack is not in the public trust store, so the first handshake does not verify it. That is the same trust-on-first-use the other setup scripts use.
+`tlsCa` in the configuration is the CA trust chain for the STS listener certificate. The demo's file names `demo/generated/idp-ca.pem`. Every run rewrites that file from `GET /tls/server-certificate`: the listener certificate, the intermediates, and the root. That is the bundle iya-sts tells a client to trust. The first fetch does not verify TLS, because there is nothing to verify it against until the file exists. If that document is not served, the script saves the chain the handshake presented instead.
+
+The script prints the trust anchor's SHA-256 fingerprint. Compare it with the Root CA on iya-sts's Server configuration, PKI page. A certified listener certificate on its own is not an anchor: the chain has to include the root that signed it. Later calls trust this file in addition to node's own store.
 
 ## Options
 

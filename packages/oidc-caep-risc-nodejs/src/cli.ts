@@ -31,6 +31,7 @@ function main(argv: string[]): void {
   console.log(`scopes:     ${config.scopes}`);
   console.log(`metadata:   ${config.metadataUrl ?? config.metadata?.issuer ?? '(file)'}`);
   console.log(`secret:     ${config.clientSecret ? 'present' : 'absent'}`);
+  console.log(`tls ca:     ${config.tlsCa ? 'present' : 'absent'}`);
   console.log(`ssf:        ${config.ssf?.transmitter ?? 'not configured'}`);
 }
 

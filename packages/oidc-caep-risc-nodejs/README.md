@@ -75,7 +75,7 @@ Names follow oidc-caep-client where the two overlap (`metadataUrl`, `client_id`,
 | `clockToleranceSec` | `30` | How far the two clocks may disagree, for the ID token. |
 | `maxIdTokenAgeSec` | `600` | Refuse an ID token whose `iat` is older than this. |
 | `allowInsecure` | `false` | Allow an `http` issuer. Loopback `http` redirect URIs are allowed either way. |
-| `tlsCa` | — | PEM certificates to trust for the provider, in addition to node's own store. A missing file is ignored. |
+| `tlsCa` | — | CA trust chain for the provider's TLS listener. PEM, `file:path`, `env:NAME`, or a path, trusted in addition to node's own store. A missing file is ignored. |
 | `ssf.transmitter` | — | The Shared Signals transmitter. Its configuration is read from `/.well-known/ssf-configuration`. |
 | `ssf.pollIntervalMs` | `5000` | How long the receiver waits between empty polls. |
 
