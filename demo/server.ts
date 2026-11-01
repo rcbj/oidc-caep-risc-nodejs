@@ -20,10 +20,11 @@
 //   POST /logout          signs every account in this browser out of this application
 //   GET  /healthz         for the container's health check
 //
-// SHARED SIGNALS: with an `ssf` block the demo is a CAEP and RISC receiver (the library's
-// SignalsReceiver). One poll stream, authenticated by a Bearer token from the client-credentials grant
-// (scope ssf.manage). An event that revokes a session, or disables, purges or compromises an account,
-// ends the matching local sessions, and their open tabs are told at once.
+// SHARED SIGNALS: with an `ssf` block, and unless `signals` is false, the demo is a CAEP and RISC
+// receiver (the library's SignalsReceiver). One poll stream, authenticated by a Bearer token from the
+// client-credentials grant (scope ssf.manage). `signals: false` does not start the receiver and does
+// not contact a transmitter. An event that revokes a session, or disables, purges or compromises an
+// account, ends the matching local sessions, and their open tabs are told at once.
 //
 // Two cookies. `oidc_txn` holds the outstanding transactions (state, nonce, code verifier), HMAC-signed,
 // scoped to /callback, SameSite=Lax: the provider brings the browser back with a top-level GET, which
@@ -49,14 +50,18 @@ const SESSION_MS = 8 * 3600_000;
 const MAX_SESSIONS = 10_000;
 const STYLES = readFileSync(resolve(here, 'public/styles.css'));
 const APP_JS = readFileSync(resolve(here, 'public/app.js'));
-const SSF = (() => {
+const loaded = (() => {
   try {
-    const raw = JSON.parse(readFileSync(CONFIG, 'utf8')) as { ssf?: { transmitter?: string; pollIntervalMs?: number } };
-    return raw.ssf?.transmitter ? raw.ssf : undefined;
+    return JSON.parse(readFileSync(CONFIG, 'utf8')) as {
+      signals?: unknown;
+      ssf?: { transmitter?: string; pollIntervalMs?: number };
+    };
   } catch {
     return undefined;
   }
 })();
+const signalsOff = loaded?.signals === false;
+const SSF = !signalsOff && loaded?.ssf?.transmitter ? loaded.ssf : undefined;
 
 // The relying party is built on first use and again after a failure, so the demo starts (and is
 // healthy) before the provider is reachable or the setup script has written the client secret.
@@ -190,9 +195,11 @@ function logFor(sid: string, entry: LoggedEvent): void {
 }
 
 let receiver: SignalsReceiver | undefined;
-let receiverState = SSF ? 'starting' : 'not configured (no ssf block in the configuration file)';
+let receiverState = signalsOff
+  ? 'not configured (signals are off)'
+  : SSF ? 'starting' : 'not configured (no ssf block in the configuration file)';
 function startReceiver(rp: RelyingParty): void {
-  if (!SSF || receiver) return;
+  if (rp.config.signals === false || !SSF || receiver) return;
   const r = new SignalsReceiver({
     transmitter: SSF.transmitter!,
     tls: rp.tls(),

@@ -69,14 +69,15 @@ Names follow oidc-caep-client where the two overlap (`metadataUrl`, `client_id`,
 | `tokenEndpointAuthMethod` | `client_secret_basic` | `client_secret_basic`, `client_secret_post`, or `private_key_jwt`. `none` is refused. |
 | `redirectUri` | required | Where the provider sends the browser. `https`, or `http` on loopback. Also `redirect_uri`. |
 | `postLogoutRedirectUri` | — | Sent on the end-session URL when the provider has one. |
-| `scopes` | `openid profile email offline_access ssf.read ssf.manage` | A space-separated string, or an array. Must include `openid`. |
+| `scopes` | `openid profile email offline_access ssf.read ssf.manage` | A space-separated string, or an array. Must include `openid`. `signals: false` removes `ssf.read` and `ssf.manage` after the default is applied. |
 | `idTokenSignedResponseAlg` | every asymmetric algorithm the provider advertises | Pin one `alg`. HMAC is accepted only when it is pinned, and the client secret is the key. |
 | `par` | `auto` | `auto` uses pushed authorization when the provider advertises it, `always` requires it, `never` puts the parameters on the authorization URL. |
 | `clockToleranceSec` | `30` | How far the two clocks may disagree, for the ID token. |
 | `maxIdTokenAgeSec` | `600` | Refuse an ID token whose `iat` is older than this. |
 | `allowInsecure` | `false` | Allow an `http` issuer. Loopback `http` redirect URIs are allowed either way. |
 | `tlsCa` | — | CA trust chain for the provider's TLS listener. PEM, `file:path`, `env:NAME`, or a path, trusted in addition to node's own store. A missing file is ignored. |
-| `ssf.transmitter` | — | The Shared Signals transmitter. Its configuration is read from `/.well-known/ssf-configuration`. |
+| `signals` | on | `false` turns CAEP and RISC off. No `ssf` block is resolved, the transmitter is not contacted, and `ssf.read` and `ssf.manage` are not requested. Anything other than `true` or `false` is an error. Omitted is the same as `true`. |
+| `ssf.transmitter` | — | The Shared Signals transmitter, used when signals are on. Its configuration is read from `/.well-known/ssf-configuration`. |
 | `ssf.pollIntervalMs` | `5000` | How long the receiver waits between empty polls. |
 
 `RelyingParty.create(config)` takes the same members after `resolveConfig` has read the files.
@@ -103,7 +104,7 @@ The ID token is verified with `jose` against the provider's JWKS (fetched with t
 
 ## Shared Signals
 
-With a transmitter, `SignalsReceiver` keeps one poll stream for the whole application. Authentication is whatever `headers` returns (a Bearer token from `clientCredentials`) or a TLS client certificate. Every SET is verified before it is acted on. See [Handling CAEP and RISC events](docs/signals.md).
+The default is on. `signals: false` turns CAEP and RISC off, drops `ssf.read` and `ssf.manage`, and does not contact a transmitter. Sign-in is unchanged. With a transmitter, and with signals left on, `SignalsReceiver` keeps one poll stream for the whole application. Authentication is whatever `headers` returns (a Bearer token from `clientCredentials`) or a TLS client certificate. Every SET is verified before it is acted on. A caller who constructs `SignalsReceiver` has opted in. See [Handling CAEP and RISC events](docs/signals.md).
 
 ## Errors
 

@@ -371,4 +371,47 @@ describe('a confidential Authorization Code client', { concurrency: 1 }, () => {
     assert.throws(() => resolveConfig({ ...file, scopes: 'profile email' }, dir), /openid/);
     delete process.env.OIDC_TEST_SECRET;
   });
+
+  it('resolves a transmitter unless signals is false, and then drops the Shared Signals scopes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oidc-signals-'));
+    const file = {
+      metadataUrl: 'https://localhost:8081/.well-known/openid-configuration',
+      client_id: CLIENT,
+      clientSecret: 'secret',
+      redirectUri: 'http://localhost:3000/callback',
+      ssf: { transmitter: 'https://localhost:8081/', pollIntervalMs: 3000 },
+    };
+    const omitted = resolveConfig(file, dir);
+    assert.equal(omitted.scopes, SCOPES);
+    assert.equal('signals' in omitted, false);
+    assert.deepEqual(omitted.ssf, { transmitter: 'https://localhost:8081', pollIntervalMs: 3000 });
+    const explicit = resolveConfig({ ...file, signals: true, scopes: SCOPES }, dir);
+    assert.equal(explicit.scopes, SCOPES);
+    assert.equal('signals' in explicit, false);
+    assert.deepEqual(explicit.ssf, omitted.ssf);
+
+    const listed = resolveConfig({
+      ...file,
+      signals: false,
+      scopes: `${SCOPES}`,
+      ssf: { transmitter: 'not-a-url' },
+    }, dir);
+    assert.equal(listed.signals, false);
+    assert.equal(listed.ssf, undefined);
+    assert.equal(listed.scopes, 'openid profile email offline_access');
+    assert.equal(listed.scopes.split(/\s+/).includes('ssf.read'), false);
+    assert.equal(listed.scopes.split(/\s+/).includes('ssf.manage'), false);
+
+    const defaults = resolveConfig({ ...file, signals: false }, dir);
+    assert.equal(defaults.signals, false);
+    assert.equal(defaults.ssf, undefined);
+    assert.equal(defaults.scopes, 'openid profile email offline_access');
+    assert.equal(defaults.scopes.split(/\s+/).includes('openid'), true);
+
+    assert.throws(() => resolveConfig({ ...file, signals: false, scopes: 'ssf.read ssf.manage' }, dir), /openid/);
+    assert.throws(
+      () => resolveConfig({ ...file, signals: 'no' }, dir),
+      (err: unknown) => err instanceof OidcError && err.code === 'config' && err.message === 'signals must be true or false',
+    );
+  });
 });
