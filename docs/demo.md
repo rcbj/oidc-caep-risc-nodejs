@@ -6,6 +6,8 @@ title: Running the demo
 
 The demo is a traditional web application. The server renders the pages. The browser holds a session cookie, not tokens. It is the same shape as the [saml2-sp-nodejs](https://github.com/rcbj/saml2-sp-nodejs) demo: several accounts in one browser, an identity tab, a CAEP and RISC tab, a live event stream, verify, clear, sign-out of one account, and sign-out of all of them.
 
+The heading and the account list show the directory username (UserInfo `preferred_username`, the uid). The identity tab still shows the subject. Shared Signals match the subject.
+
 ## With iya-sts
 
 iya-sts listens on `https://localhost:8081`. From this repository:

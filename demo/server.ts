@@ -134,7 +134,47 @@ function tell(sid: string, event: string, data: unknown, id?: number): void {
 
 const shortType = (uri: string) => uri.replace(/^.*\/event-type\//, '');
 const familyOf = (uri: string): LoggedEvent['family'] => (/\/caep\//.test(uri) ? 'CAEP' : /\/risc\//.test(uri) ? 'RISC' : 'SSF');
+// The heading and the account list show the directory uid. The subject stays the protocol
+// subject, which is what Shared Signals match. A code-flow ID token omits profile claims, so
+// the uid is UserInfo `preferred_username` (filled below). The access token's `username`
+// claim is that same uid when UserInfo does not return one.
 const who = (login: OidcLogin) => login.preferredUsername || login.email || login.subject;
+
+function accessUsername(token: string): string | undefined {
+  const payload = token.split('.')[1];
+  if (!payload) return undefined;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { username?: unknown };
+    return typeof claims.username === 'string' && claims.username ? claims.username : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function withUsername(rp: RelyingParty, login: OidcLogin): Promise<OidcLogin> {
+  let preferred = login.preferredUsername;
+  let email = login.email;
+  let name = login.name;
+  let claims = login.claims;
+  try {
+    const info = await rp.userinfo(login.accessToken, login.subject);
+    if (typeof info.preferred_username === 'string' && info.preferred_username) preferred = info.preferred_username;
+    if (!email && typeof info.email === 'string' && info.email) email = info.email;
+    if (!name && typeof info.name === 'string' && info.name) name = info.name;
+    claims = { ...login.claims, ...info };
+  } catch (err) {
+    // The sign-in still stands. The page shows the subject until a username is known.
+    console.warn(`userinfo: ${(err as Error).message}`);
+  }
+  if (!preferred) preferred = accessUsername(login.accessToken);
+  return {
+    ...login,
+    claims,
+    ...(preferred ? { preferredUsername: preferred } : {}),
+    ...(email ? { email } : {}),
+    ...(name ? { name } : {}),
+  };
+}
 
 const LOG_SIZE = 25;
 let sequence = 0;
@@ -367,13 +407,11 @@ ${accounts.length > 1 ? '<form method="post" action="/logout" class="inline"><bu
 
 function claimRows(login: OidcLogin): string {
   const claims = login.claims;
-  const rows: Array<[string, string]> = [
-    ['Subject', login.subject],
-    ['Issuer', login.issuer],
-  ];
+  const rows: Array<[string, string]> = [];
+  if (login.preferredUsername) rows.push(['Username', login.preferredUsername]);
+  rows.push(['Subject', login.subject], ['Issuer', login.issuer]);
   if (login.email) rows.push(['Email', login.email]);
   if (login.name) rows.push(['Name', login.name]);
-  if (login.preferredUsername) rows.push(['Preferred username', login.preferredUsername]);
   if (login.sid) rows.push(['Provider session', login.sid]);
   if (typeof claims.auth_time === 'number') rows.push(['Authenticated', new Date(claims.auth_time * 1000).toISOString()]);
   if (claims.acr) rows.push(['acr', String(claims.acr)]);
@@ -522,7 +560,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const txn = pending?.txns.find((t) => sameState(t.state, state));
     try {
       if (!txn) throw new OidcError('validation', 'this callback is not a sign-in this browser started');
-      const login = await rp.complete(url.searchParams, txn);
+      const login = await withUsername(rp, await rp.complete(url.searchParams, txn));
       if (sessions.size >= MAX_SESSIONS) {
         for (const [k, s] of sessions) if (s.expires <= Date.now()) sessions.delete(k);
       }
