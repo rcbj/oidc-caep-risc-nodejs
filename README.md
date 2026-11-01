@@ -16,7 +16,7 @@ It is built and tested against [iya-sts](https://rcbj.github.io/iya-sts/).
 
 ## License
 
-Business Source License 1.1. The licensor is Iya CyberSecurity Solutions, LLC. Production use requires a commercial license, granted only as part of a paid support subscription. See [LICENSE](LICENSE).
+MIT © 2026 Iya CyberSecurity Solutions, LLC. See [LICENSE](LICENSE).
 
 ## Install
 

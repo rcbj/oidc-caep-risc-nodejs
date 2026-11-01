@@ -14,7 +14,7 @@ A **confidential OpenID Connect client** for **server-side** Node.js application
 
 It is TypeScript and works from JavaScript, needs no web framework, and depends on [`jose`](https://github.com/panva/jose) only. It is built and tested against [iya-sts](https://rcbj.github.io/iya-sts/).
 
-The license is the Business Source License 1.1. Production use requires a commercial license from Iya CyberSecurity Solutions, LLC.
+MIT licensed. © 2026 Iya CyberSecurity Solutions, LLC.
 
 ## Install
 
