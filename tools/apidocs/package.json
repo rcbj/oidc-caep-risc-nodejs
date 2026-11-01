@@ -2,7 +2,7 @@
   "name": "oidc-caep-risc-nodejs-api-docs",
   "private": true,
   "description": "Generates the TypeDoc reference for the documentation site. A package of its own, outside the npm workspace, because TypeDoc runs on TypeScript 6 and the library builds with TypeScript 7.",
-  "license": "BUSL-1.1",
+  "license": "MIT",
   "scripts": {
     "build": "typedoc --options typedoc.json"
   },

@@ -10,5 +10,5 @@
   "dependencies": {
     "oidc-caep-risc-nodejs": "*"
   },
-  "license": "BUSL-1.1"
+  "license": "MIT"
 }
