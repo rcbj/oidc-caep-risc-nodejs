@@ -2,6 +2,8 @@
 
 A server-side application has one Shared Signals stream for everyone who uses it. The receiver polls that stream, verifies each Security Event Token, and tells the application which of its own sessions the event is about. The browser never sees the transmitter, and it never holds the token the receiver authenticates with.
 
+The default is on. `signals: false` turns CAEP and RISC off, drops `ssf.read` and `ssf.manage` from the authorization request, and does not contact a transmitter. The receiver below is not started. A caller who constructs `SignalsReceiver` has opted in.
+
 The event type URIs are the same ones [oidc-caep-client](https://github.com/rcbj/oidc-caep-client) uses. CAEP events are about sessions. RISC events are about accounts. SSF's own two events are about the stream.
 
 ## What the receiver ends

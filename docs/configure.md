@@ -31,6 +31,8 @@ No browser origin is registered. This client is a server.
 
 The client-credentials grant is there so the demo can take its own access token for the Shared Signals stream. The script adds the application to `SSF_READ` and `SSF_MANAGE` for whichever of `ssf.read` and `ssf.manage` the scopes name. iya-sts issues `ssf.read` only when the person is in the group `ssf-read` and the application holds `SSF_READ`; `ssf.manage` the same way through `ssf-manage` and `SSF_MANAGE`.
 
+When the configuration sets `signals` to `false`, those two scopes are ignored even if the file still lists them. The script does not add the application to `SSF_READ` or `SSF_MANAGE`, and it does not put the test user in `ssf-read` or `ssf-manage`. It does not register a transmitter. The default is on, which is what `demo/oidc.json` leaves in place.
+
 It also turns on `authn.multipleAccounts`, so one browser can hold several signed-in people. Without that, iya-sts ends the first person's session when the next one signs in, and the CAEP event ends that account in the demo.
 
 ## The secret, and running it again

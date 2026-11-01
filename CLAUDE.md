@@ -4,6 +4,8 @@ A confidential OpenID Connect relying party for a traditional Node.js applicatio
 
 The browser library is [oidc-caep-client](https://github.com/rcbj/oidc-caep-client). It is a public client. This one is not. The discovery URL and the default scopes match.
 
+`signals` defaults to on. `signals: false` turns CAEP and RISC off: the receiver does not start, transmitter metadata is not required, and the authorization request does not include `ssf.read` or `ssf.manage`. `DEFAULT_SCOPES` still names those two scopes. They are removed after that default is applied.
+
 Documentation: <https://rcbj.github.io/oidc-caep-risc-nodejs/>. The license is the MIT License in `LICENSE`. The Business Source License used by iya-sts does not apply here.
 
 Node.js 22.18 or later. The package engines field says `>=22.18.0`. Continuous integration runs the suite on 22.18.0 and 24.22.1.
