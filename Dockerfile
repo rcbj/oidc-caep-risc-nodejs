@@ -2,8 +2,9 @@
 #
 # The demo app's image. The library is compiled in the first stage; the second holds only what runs:
 # the compiled library, its runtime dependency and the demo, whose server.ts Node runs as it is.
-# The client secret and the provider's TLS root are NOT in the image: they are mounted at
-# /app/demo/generated (docker-compose.yml), made on the host by the setup script.
+# The client secret and the listener CA trust chain are NOT in the image: they are mounted at
+# /app/demo/generated (docker-compose.yml). The setup script writes them. At start, the entrypoint
+# refreshes the chain into the file the configuration's tlsCa names.
 # 24.22.1: the 21 October 2026 security release, which fixes HTTP2Shell / Node2Shell (CVE-2026-111497).
 FROM node:24.22.1-alpine AS build
 WORKDIR /src
@@ -25,8 +26,12 @@ RUN npm ci --omit=dev --workspaces --include-workspace-root --ignore-scripts && 
 COPY --from=build /src/packages/oidc-caep-risc-nodejs/dist packages/oidc-caep-risc-nodejs/dist
 COPY demo/server.ts demo/oidc.json demo/
 COPY demo/public demo/public
+COPY scripts/trust-chain.mjs scripts/trust-chain.mjs
+COPY demo/entrypoint.sh /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s \
   CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null || exit 1
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "demo/server.ts"]

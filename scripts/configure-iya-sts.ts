@@ -4,8 +4,9 @@
  *
  *   1. the client secret, if demo/generated/client-secret does not exist yet (32 bytes, mode 0600).
  *      A re-run does not rotate it: an application that already exists is left with the secret it has;
- *   2. the provider's TLS root, if the configuration's tlsCa file does not exist yet, taken from the
- *      handshake (trust on first use) and its fingerprint printed;
+ *   2. the listener's CA trust chain, written to the configuration's tlsCa file on every run. The
+ *      bundle is GET /tls/server-certificate (leaf, intermediates, and the root). The handshake's
+ *      chain is the fallback. The trust anchor's fingerprint is printed;
  *   3. the application, in the realm the metadata URL names: protocols oauth2 and oidc, response type
  *      code, grants authorization_code, refresh_token and client_credentials, the scopes from the
  *      configuration file, and token endpoint authentication client_secret_basic. No browser origin is
@@ -22,12 +23,12 @@
  * ADMIN_API_CLIENT_SECRET or STS_ADMIN_API_CLIENT_SECRET.
  */
 
-import { randomBytes, X509Certificate } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
-import { connect, type PeerCertificate } from 'node:tls';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { send } from '../packages/oidc-caep-risc-nodejs/src/http.ts';
+import { saveTrustChain, trustPath } from './trust-chain.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -151,6 +152,7 @@ export function filesOf(configPath: string, publicUrl: string): DemoFiles {
   const origin = publicUrl.endsWith('/') ? publicUrl : `${publicUrl}/`;
   const redirectUri = String(raw.redirectUri ?? raw.redirect_uri ?? '').trim() || new URL('callback', origin).href;
   const postLogoutRedirectUri = String(raw.postLogoutRedirectUri ?? raw.post_logout_redirect_uri ?? '').trim() || new URL('./', origin).href;
+  const tlsCa = trustPath(raw.tlsCa, base);
   return {
     clientId,
     redirectUri,
@@ -159,7 +161,7 @@ export function filesOf(configPath: string, publicUrl: string): DemoFiles {
     tokenEndpointAuthMethod: method,
     metadataUrl,
     secretFile: at(secretRaw.slice(5)),
-    ...(raw.tlsCa ? { tlsCa: at(raw.tlsCa) } : {}),
+    ...(tlsCa ? { tlsCa } : {}),
     ...(raw.ssf?.transmitter ? { ssfTransmitter: raw.ssf.transmitter.replace(/\/+$/, '') } : {}),
   };
 }
@@ -273,19 +275,6 @@ export function planFor(files: DemoFiles, base: string, testUser: string, client
   return calls;
 }
 
-function fetchTlsRoot(origin: string): Promise<X509Certificate> {
-  const u = new URL(origin);
-  return new Promise((resolvePromise, reject) => {
-    const socket = connect({ host: u.hostname, port: Number(u.port || 443), servername: u.hostname, rejectUnauthorized: false }, () => {
-      let cert = socket.getPeerCertificate(true) as PeerCertificate & { issuerCertificate?: PeerCertificate };
-      while (cert.issuerCertificate && cert.issuerCertificate !== cert && cert.issuerCertificate.raw) cert = cert.issuerCertificate;
-      socket.end();
-      resolvePromise(new X509Certificate(cert.raw));
-    });
-    socket.on('error', reject);
-  });
-}
-
 async function json(url: string, ca: string | undefined, init: { method?: string; headers?: Record<string, string>; body?: string }) {
   const answer = await send(url, init, ca ? { ca } : {}, 'config');
   let body: Record<string, unknown> = {};
@@ -334,7 +323,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   const onDisk = existsSync(files.secretFile) ? readFileSync(files.secretFile, 'utf8').trim() : '';
   if (args.dryRun) {
-    if (files.tlsCa && !existsSync(files.tlsCa)) console.log(`# would save ${origin}'s TLS root to ${files.tlsCa}`);
+    if (files.tlsCa) console.log(`# would save ${origin}'s listener CA trust chain to ${files.tlsCa}`);
     if (!onDisk) console.log(`# would write a new client secret to ${files.secretFile} (mode 0600)`);
     else console.log(`# would keep the client secret at ${files.secretFile}`);
     for (const call of planFor(files, base, args.testUser, onDisk || '<a new client secret>')) {
@@ -346,15 +335,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   let ca: string | undefined;
   if (files.tlsCa) {
-    if (!existsSync(files.tlsCa)) {
-      const root = await fetchTlsRoot(origin);
-      mkdirSync(dirname(files.tlsCa), { recursive: true });
-      writeFileSync(files.tlsCa, `${root.toString().trim()}\n`);
-      console.log(`Saved ${origin}'s TLS root to ${files.tlsCa} (trusted on first use):`);
-      console.log(`  ${root.subject.replace(/\n/g, ', ')}\n  sha256 ${root.fingerprint256}`);
-      console.log('  Compare it with the Root CA on iya-sts\'s Server configuration → PKI page.');
-    }
-    ca = readFileSync(files.tlsCa, 'utf8');
+    const chain = await saveTrustChain(origin, files.tlsCa);
+    ca = chain.pem;
+    console.log(`Saved ${origin}'s listener CA trust chain (${chain.count} certificate(s)) to ${files.tlsCa}`);
+    console.log(`  trust anchor ${chain.anchor.subject.replace(/\n/g, ', ')}`);
+    console.log(`  sha256 ${chain.anchor.fingerprint256}`);
+    console.log('  Compare the anchor with the Root CA on iya-sts\'s Server configuration, PKI page.');
   }
 
   const adminSecret = process.env.ADMIN_API_CLIENT_SECRET || process.env.STS_ADMIN_API_CLIENT_SECRET || '';

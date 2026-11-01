@@ -1,6 +1,6 @@
 // The back channel: discovery, the token endpoint, UserInfo, and the Shared Signals transmitter.
-// node:http(s) only. TLS is always verified; `ca` adds certificates to trust beyond node's own store
-// (an identity provider whose listener certificate chains to a private root). Answers are capped.
+// node:http(s) only. TLS is always verified; `ca` is the listener's CA trust chain (one PEM bundle,
+// leaf through root) added to node's own store. Answers are capped.
 
 import http from 'node:http';
 import https from 'node:https';
@@ -11,7 +11,7 @@ const MAX_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
 
 export interface TlsOptions {
-  /** PEM certificates to trust for TLS, in addition to node's own store. */
+  /** PEM CA trust chain for the TLS listener, in addition to node's own store. */
   ca?: string;
   /** A client certificate and key to present (mutual TLS), PEM. */
   cert?: string;
