@@ -19,6 +19,7 @@
 //   POST /u/<a>/logout    signs that account out of this application; the others stay
 //   POST /logout          signs every account in this browser out of this application
 //   GET  /healthz         for the container's health check
+//   GET  /live-status     signedIn, subject, receiver, and accepted events (type and jti); no tokens
 //
 // SHARED SIGNALS: with an `ssf` block, and unless `signals` is false, the demo is a CAEP and RISC
 // receiver (the library's SignalsReceiver). One poll stream, authenticated by a Bearer token from the
@@ -198,6 +199,8 @@ let receiver: SignalsReceiver | undefined;
 let receiverState = signalsOff
   ? 'not configured (signals are off)'
   : SSF ? 'starting' : 'not configured (no ssf block in the configuration file)';
+// Accepted events, recorded from the handler installed before start() polls. type and jti only.
+const liveEvents: Array<{ type: string; jti: string }> = [];
 function startReceiver(rp: RelyingParty): void {
   if (rp.config.signals === false || !SSF || receiver) return;
   const r = new SignalsReceiver({
@@ -218,6 +221,7 @@ function startReceiver(rp: RelyingParty): void {
     },
   });
   r.on('*', (event: SignalEvent) => {
+    liveEvents.push({ type: event.type, jti: event.jti });
     const entry: LoggedEvent = {
       id: ++sequence,
       at: new Date().toISOString(),
@@ -469,6 +473,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const method = req.method ?? 'GET';
 
   if (url.pathname === '/healthz') return send(res, 200, 'ok', { 'content-type': 'text/plain' });
+  if (url.pathname === '/live-status' && method === 'GET') {
+    const accounts = accountsOf(req);
+    const body = {
+      signedIn: accounts.length > 0,
+      subject: accounts[0] ? who(accounts[0].session.login) : null,
+      receiver: receiverState,
+      events: liveEvents.map((event) => ({ type: event.type, jti: event.jti })),
+    };
+    return send(res, 200, JSON.stringify(body), { 'content-type': 'application/json; charset=utf-8' });
+  }
   if (url.pathname === '/styles.css') return send(res, 200, STYLES, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'max-age=300' });
   if (url.pathname === '/app.js') return send(res, 200, APP_JS, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'max-age=300' });
 

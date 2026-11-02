@@ -16,7 +16,7 @@ Node.js 22.18 or later. The package engines field says `>=22.18.0`. Continuous i
 |---|---|
 | `packages/oidc-caep-risc-nodejs` | The library published to npm as `oidc-caep-risc-nodejs`. Source is `src/` (`relying-party.ts`, `client-auth.ts`, `id-token.ts`, `pkce.ts`, `discovery.ts`, `ssf/`). Tests are `test/`. `npm run build` writes `dist/`. |
 | `demo` | The server-rendered demo. `demo/server.ts` and `demo/public/`. Config is `demo/oidc.json`. |
-| `scripts` | `configure-iya-sts.ts` registers the confidential client on iya-sts. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
+| `scripts` | `configure-iya-sts.ts` registers the confidential client on iya-sts. `live_iya_sts.py` is the host Python live sign-in. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
 | `docs` | The GitHub Pages site. |
 | `tools/apidocs` | TypeDoc. It is outside the npm workspace. |
 | `Dockerfile`, `docker-compose.yml` | The demo image. Compose uses host networking. |
@@ -51,7 +51,13 @@ npm run version:check
 
 `npm test` runs `node:test` on the TypeScript sources in `packages/oidc-caep-risc-nodejs/test` and on `scripts/*.test.ts`. The library tests use a stub provider and a stub transmitter. `version:check` fails unless every manifest is `M.N.0`.
 
+The unit suite is `docker build --target test .`. That stage runs `npm test` in the image. It is not the default target, so `docker build .` and `docker compose build` still produce the demo.
+
 `.github/workflows/tests.yml` also builds the demo image and checks what it serves. That job publishes host port 3000. Do not run it while a demo is already bound there. The in-process commands above do not need the container.
+
+`python3 scripts/live_iya_sts.py` signs the demo in to a fresh iya-sts in memory mode, with persistence and clustering off and no request workers, unless `IYA_STS_URL` is already set. It uses the host's Python and Docker. It does not import this library and does not run Node on the host. `scripts/configure-iya-sts.ts` runs inside the demo image (`docker run --network host` with the image entrypoint). The demo container is `oidc-caep-risc-nodejs-live-demo`. `IYA_STS_URL` uses a running iya-sts and does not stop it. `IYA_STS_IMAGE` starts a fresh `iya-sts-live-oidc-caep-risc-nodejs` container from that image. With neither, it clones and builds iya-sts main, which is what the nightly run does. `LIVE_STS_PORT` (default 18501) and `LIVE_DEMO_PORT` (default 18601) pick the ports. A second run against an iya-sts that already has the client fails, so use a fresh one. Do not bind port 3000 or 8081.
+
+`.github/workflows/nightly.yml` runs `docker build --target test .`, then the live script, on the cron `3 6 * * *` and on `workflow_dispatch`. `tests.yml` stays the push and pull-request CI.
 
 ## Demo
 
@@ -64,6 +70,8 @@ docker compose up --build
 ```
 
 Open <http://localhost:3000> and sign in as `oidc-demo-user`.
+
+`GET /live-status` returns JSON: `signedIn`, `subject`, `receiver`, and `events` (`type` and `jti` only). No access token, refresh token, or ID token. The receiver records every accepted event before it starts polling. `session-revoked` ends the matching local session, so `signedIn` is false.
 
 A loopback redirect follows `PORT` in the running server and in `scripts/configure-iya-sts.ts`. Any other host is left as written. An explicit `--public-url` or a non-empty `PUBLIC_URL` replaces the origin and keeps the path. The running container's `PORT` wins over the shell's when the script registers the application. `pollIntervalMs` is a millisecond pause, not a port.
 
