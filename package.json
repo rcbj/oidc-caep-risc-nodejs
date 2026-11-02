@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "build": "npm run build -w packages/oidc-caep-risc-nodejs",
+    "pretest": "npm run build",
     "test": "npm test -w packages/oidc-caep-risc-nodejs && node --test scripts/*.test.mjs scripts/*.test.ts",
     "start": "node demo/server.ts",
     "configure-iya-sts": "node scripts/configure-iya-sts.ts",
