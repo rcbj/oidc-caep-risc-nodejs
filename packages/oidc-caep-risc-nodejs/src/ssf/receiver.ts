@@ -12,7 +12,7 @@
 // grant, scope ssf.manage) or a TLS client certificate. Every SET is verified — signature against the
 // transmitter's JWKS, iss, aud, typ — before anything acts on it, and acknowledged only once handled.
 
-import { wellKnownUrls } from '../discovery.ts';
+import { trimTrailingSlashes, wellKnownUrls } from '../discovery.ts';
 import { OidcError } from '../errors.ts';
 import { send, type TlsOptions } from '../http.ts';
 import { DEFAULT_ENDING_EVENTS, DEFAULT_EVENTS_REQUESTED, EVENT, subjectOf, type SubjectRef } from './events.ts';
@@ -111,7 +111,7 @@ export class SignalsReceiver {
       maxEvents: 50,
       log: console,
       ...options,
-      transmitter: options.transmitter.replace(/\/+$/, ''),
+      transmitter: trimTrailingSlashes(options.transmitter),
     };
     this.#index = options.sessionIndex ?? new MemorySessionIndex();
   }
