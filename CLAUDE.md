@@ -15,8 +15,8 @@ Node.js 22.18 or later. The package engines field says `>=22.18.0`. Continuous i
 | Path | What it is |
 |---|---|
 | `packages/oidc-caep-risc-nodejs` | The library published to npm as `oidc-caep-risc-nodejs`. Source is `src/` (`relying-party.ts`, `client-auth.ts`, `id-token.ts`, `pkce.ts`, `discovery.ts`, `ssf/`). Tests are `test/`. `npm run build` writes `dist/`. |
-| `demo` | The server-rendered demo. `demo/server.ts` and `demo/public/`. Config is `demo/oidc.json`. |
-| `scripts` | `configure-iya-sts.ts`, the install script, registers the confidential client on iya-sts and writes the listener CA trust chain to the file `tlsCa` names. `trust-chain.mjs` holds `saveTrustChain()` and refreshes that file. `trust-chain.test.ts`: the chain is written whole to `tlsCa`'s path, and the library trusts a provider through it. `live_iya_sts.py` is the host Python live sign-in. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
+| `demo` | The server-rendered demo. `demo/server.ts` and `demo/public/`. Config is `demo/oidc.json`. An error is logged with its stack and the page shows a fixed sentence; a refused sign-in shows the label of its `OidcError` code. Never render an error's message. |
+| `scripts` | `configure-iya-sts.ts`, the install script, registers the confidential client on iya-sts and writes the listener CA trust chain to the file `tlsCa` names. `trust-chain.mjs` holds `saveTrustChain()` and refreshes that file. `trust-chain.test.ts`: the chain is written whole to `tlsCa`'s path, and the library trusts a provider through it. `demo-errors.test.ts` starts `demo/server.ts` and holds that no page and no `/live-status` answer carries an exception's text or a provider `error_description`. `live_iya_sts.py` is the host Python live sign-in. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
 | `docs` | The GitHub Pages site. |
 | `tools/apidocs` | TypeDoc. It is outside the npm workspace. |
 | `Dockerfile`, `docker-compose.yml` | The demo image. Compose uses host networking. |
@@ -49,7 +49,7 @@ npm run build
 npm run version:check
 ```
 
-`npm test` runs `node:test` on the TypeScript sources in `packages/oidc-caep-risc-nodejs/test` and on `scripts/*.test.ts`. The library tests use a stub provider and a stub transmitter. `version:check` fails unless every manifest is `M.N.0`.
+`npm test` builds the library first (`pretest`: `scripts/demo-errors.test.ts` runs the demo, which imports the built package), then runs `node:test` on the TypeScript sources in `packages/oidc-caep-risc-nodejs/test` and on `scripts/*.test.ts`. The library tests use a stub provider and a stub transmitter. `version:check` fails unless every manifest is `M.N.0`.
 
 The unit suite is `docker build --target test .`. That stage runs `npm test` in the image. It is not the default target, so `docker build .` and `docker compose build` still produce the demo.
 
@@ -69,7 +69,7 @@ The demo image build copies that file into the image at `/app/demo/generated/idp
 
 The mechanism is `COPY demo demo` plus `.dockerignore`'s `demo/generated/*` and `!demo/generated/idp-ca.pem`. Do not replace it with a COPY that names the file or globs for it: when the file is absent, BuildKit fails on the missing path and the classic builder fails with "no source files were specified". A directory COPY of `demo/` (which always exists) succeeds in both.
 
-The container entrypoint also refreshes the file from the provider at start, because a development iya-sts makes a new CA when it restarts. A failed refresh keeps the file from the build. `TLS_CA_REFRESH=0` turns the refresh off. `node scripts/trust-chain.mjs --config demo/oidc.json` refreshes it by hand. Compose still mounts `demo/generated` (for the client secret), which hides the image's copy behind the host's file.
+The container entrypoint also refreshes the file from the provider at start, because a development iya-sts makes a new CA when it restarts. A failed refresh keeps the file from the build. The refresh verifies the provider against the chain the file already holds; only when that chain cannot verify it (no file yet, or a new CA) does it take the provider's chain on first use, still checking that it names the host and is signed link by link, and it prints the root's SHA-256 to compare with iya-sts's PKI page. `TLS_CA_REFRESH=0` turns the refresh off. `node scripts/trust-chain.mjs --config demo/oidc.json` refreshes it by hand. Compose still mounts `demo/generated` (for the client secret), which hides the image's copy behind the host's file.
 
 ## Demo
 
