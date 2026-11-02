@@ -26,6 +26,9 @@ COPY packages/oidc-caep-risc-nodejs/test packages/oidc-caep-risc-nodejs/test
 COPY scripts scripts
 COPY VERSION VERSION
 COPY demo/oidc.json demo/oidc.json
+# scripts/demo-errors.test.ts starts the demo server itself.
+COPY demo/server.ts demo/server.ts
+COPY demo/public demo/public
 RUN npm test
 
 FROM node:24.22.1-alpine

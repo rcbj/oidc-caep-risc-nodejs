@@ -21,6 +21,11 @@
 //   GET  /healthz         for the container's health check
 //   GET  /live-status     signedIn, subject, receiver, and accepted events (type and jti); no tokens
 //
+// ERRORS. No page and no JSON answer carries an exception's text: a message from the library can
+// quote the provider (an OAuth error_description, a callback's iss), a file path or a configuration
+// value. The demo logs the error, with its stack, and shows a fixed sentence: for a refused sign-in,
+// the label of the library's OidcError code (signInRefusal below); otherwise a generic one.
+//
 // SHARED SIGNALS: with an `ssf` block, and unless `signals` is false, the demo is a CAEP and RISC
 // receiver (the library's SignalsReceiver). One poll stream, authenticated by a Bearer token from the
 // client-credentials grant (scope ssf.manage). `signals: false` does not start the receiver and does
@@ -252,11 +257,30 @@ function startReceiver(rp: RelyingParty): void {
   r.start().then(() => {
     receiverState = `polling stream ${r.stream?.stream_id} at ${SSF.transmitter}`;
   }, (err: Error) => {
-    receiverState = `not running: ${err.message}`;
+    // The page and /live-status show a fixed state; the reason is in the log only.
+    receiverState = 'not running (the receiver did not start; see the demo\'s log)';
     receiver = undefined;
-    console.warn(`ssf: the receiver did not start: ${err.message}`);
+    console.warn(`ssf: the receiver did not start: ${logged(err)}`);
   });
 }
+
+// What an error becomes in the log: its stack, which starts with its message. Not the object: an
+// OidcError also carries the provider's OAuth error, and its fields are not logged
+// (CodeQL js/clear-text-logging).
+const logged = (err: unknown) => (err instanceof Error ? (err.stack ?? err.message) : String(err));
+
+// The one sentence a refused sign-in shows, per OidcError code. Literals only: the error's message
+// and its provider error_description go to the log, never to the browser.
+const REFUSAL_LABELS: Record<string, string> = {
+  config: 'This application\'s sign-in configuration is incomplete.',
+  discovery: 'The identity provider\'s metadata could not be read.',
+  protocol: 'The identity provider refused the sign-in, or did not answer as expected.',
+  validation: 'The sign-in response did not pass this application\'s checks.',
+  signature: 'A token from the identity provider did not have a valid signature.',
+  ssf: 'The Shared Signals transmitter could not be reached.',
+};
+const signInRefusal = (err: unknown) =>
+  (err instanceof OidcError && Object.hasOwn(REFUSAL_LABELS, err.code) ? REFUSAL_LABELS[err.code]! : 'The sign-in could not be completed.');
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const mac = (value: string) => createHmac('sha256', SECRET).update(value).digest('base64url');
@@ -542,7 +566,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     try {
       rp = await relyingParty();
     } catch (err) {
-      problem = `The relying party is not configured yet: ${(err as Error).message}. Run the setup script (npm run configure-iya-sts).`;
+      console.warn(`relying party not ready: ${logged(err)}`);
+      problem = 'The relying party is not configured yet (the reason is in the demo\'s log). Run the setup script (npm run configure-iya-sts).';
     }
     const tab = url.searchParams.get('tab') === 'events' ? 'events' : 'identity';
     const notice = url.searchParams.get('verify') === 'sent'
@@ -618,9 +643,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       });
       res.end();
     } catch (err) {
-      const what = err instanceof OidcError ? `${err.code}: ${err.message}` : (err as Error).message;
-      console.warn(`sign-in refused: ${what}`);
-      send(res, 400, page('Sign-in failed', `<h1>Sign-in failed</h1><p class="problem">${esc(what)}</p><p><a href="/">Start again</a></p>`), { 'set-cookie': clearPending });
+      console.warn(`sign-in refused${err instanceof OidcError ? ` (${err.code})` : ''}: ${logged(err)}`);
+      send(res, 400, page('Sign-in failed', `<h1>Sign-in failed</h1><p class="problem">${esc(signInRefusal(err))} The reason is in this application's log.</p><p><a href="/">Start again</a></p>`), { 'set-cookie': clearPending });
     }
     return;
   }
@@ -679,10 +703,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
 const server = http.createServer((req, res) => {
   handle(req, res).catch((err: Error) => {
-    // The stack, not the error object: an OidcError also carries the provider's OAuth error, and the
-    // object's fields are not logged (CodeQL js/clear-text-logging).
-    console.error(`request failed: ${err.stack ?? err.message}`);
-    if (!res.headersSent) send(res, 500, page('Error', `<h1>Something went wrong</h1><p class="problem">${esc(err.message)}</p><p><a href="/">Home</a></p>`));
+    // The stack goes to the log (see `logged`); the page shows a fixed sentence, never the message.
+    console.error(`request failed: ${logged(err)}`);
+    if (!res.headersSent) send(res, 500, page('Error', '<h1>Something went wrong</h1><p class="problem">This request could not be completed. The reason is in this application\'s log.</p><p><a href="/">Home</a></p>'));
     else res.end();
   });
 });
