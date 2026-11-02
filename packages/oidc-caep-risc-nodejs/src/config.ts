@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
-import { DEFAULT_SCOPES, issuerFromMetadataUrl, validateProviderMetadata, type ProviderMetadata } from './discovery.ts';
+import { DEFAULT_SCOPES, issuerFromMetadataUrl, trimTrailingSlashes, validateProviderMetadata, type ProviderMetadata } from './discovery.ts';
 import { OidcError } from './errors.ts';
 
 /** How this client authenticates to the token endpoint. `none` is a public client, and this library refuses it. */
@@ -218,7 +218,7 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
   const postLogout = String(doc.postLogoutRedirectUri ?? doc.post_logout_redirect_uri ?? '').trim();
   let ssf: ResolvedConfig['ssf'];
   if (signals && doc.ssf?.transmitter) {
-    const transmitter = doc.ssf.transmitter.replace(/\/+$/, '');
+    const transmitter = trimTrailingSlashes(doc.ssf.transmitter);
     if (!/^https?:\/\//.test(transmitter)) throw new OidcError('config', 'ssf.transmitter must be an http(s) URL');
     ssf = { transmitter, ...(doc.ssf.pollIntervalMs ? { pollIntervalMs: doc.ssf.pollIntervalMs } : {}) };
   }
