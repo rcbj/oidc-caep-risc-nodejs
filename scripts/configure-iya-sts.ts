@@ -377,6 +377,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     console.log(`  trust anchor ${chain.anchor.subject.replace(/\n/g, ', ')}`);
     console.log(`  sha256 ${chain.anchor.fingerprint256}`);
     console.log('  Compare the anchor with the Root CA on iya-sts\'s Server configuration, PKI page.');
+    console.log('  The demo image build copies that trust chain in. Rebuild it after running this against another iya-sts.');
   }
 
   const adminSecret = process.env.ADMIN_API_CLIENT_SECRET || process.env.STS_ADMIN_API_CLIENT_SECRET || '';

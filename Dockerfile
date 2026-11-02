@@ -4,9 +4,10 @@
 # suite and is not the default target, so `docker build .` still produces the demo. The last stage
 # holds only what runs: the compiled library, its runtime dependency and the demo, whose server.ts
 # Node runs as it is. It also has the registrar, which a live sign-in runs with the image entrypoint.
-# The client secret and the listener CA trust chain are NOT in the image: they are mounted at
-# /app/demo/generated (docker-compose.yml). The setup script writes them. At start, the entrypoint
-# refreshes the chain into the file the configuration's tlsCa names.
+# The listener CA trust chain IS in the image: tlsCa's file, demo/generated/idp-ca.pem, which the
+# install script (scripts/configure-iya-sts.ts) wrote before the build. The client secret is NOT:
+# it is mounted at /app/demo/generated (docker-compose.yml). At start, the entrypoint refreshes the
+# chain into the file tlsCa names, unless TLS_CA_REFRESH=0.
 # 24.22.1: the 21 October 2026 security release, which fixes HTTP2Shell / Node2Shell (CVE-2026-111497).
 FROM node:24.22.1-alpine AS build
 WORKDIR /src
@@ -24,6 +25,7 @@ RUN apk add --no-cache openssl
 COPY packages/oidc-caep-risc-nodejs/test packages/oidc-caep-risc-nodejs/test
 COPY scripts scripts
 COPY VERSION VERSION
+COPY demo/oidc.json demo/oidc.json
 RUN npm test
 
 FROM node:24.22.1-alpine
@@ -36,8 +38,14 @@ RUN npm ci --omit=dev --workspaces --include-workspace-root --ignore-scripts && 
 COPY --from=build /src/packages/oidc-caep-risc-nodejs/dist packages/oidc-caep-risc-nodejs/dist
 # configure-iya-sts.ts imports the library source; Node runs that file as it is.
 COPY packages/oidc-caep-risc-nodejs/src packages/oidc-caep-risc-nodejs/src
-COPY demo/server.ts demo/oidc.json demo/
-COPY demo/public demo/public
+# The demo, and with it tlsCa's file: demo/generated/idp-ca.pem, the iya-sts listener CA trust
+# chain scripts/configure-iya-sts.ts saved. The image trusts that iya-sts with no bind mount and no
+# fetch. Rebuild after running the install script against a different iya-sts.
+# .dockerignore admits that one file from demo/generated (never the client secret or a key), and
+# keeps out node_modules. A COPY of the demo DIRECTORY succeeds with or without the chain, so a
+# fresh clone and CI still build; naming the file, or a glob that matches nothing, fails the build
+# in both builders.
+COPY demo demo
 COPY scripts/trust-chain.mjs scripts/redirects.mjs scripts/configure-iya-sts.ts scripts/
 COPY demo/entrypoint.sh /entrypoint.sh
 RUN chmod 755 /entrypoint.sh

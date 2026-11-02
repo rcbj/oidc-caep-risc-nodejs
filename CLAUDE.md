@@ -16,7 +16,7 @@ Node.js 22.18 or later. The package engines field says `>=22.18.0`. Continuous i
 |---|---|
 | `packages/oidc-caep-risc-nodejs` | The library published to npm as `oidc-caep-risc-nodejs`. Source is `src/` (`relying-party.ts`, `client-auth.ts`, `id-token.ts`, `pkce.ts`, `discovery.ts`, `ssf/`). Tests are `test/`. `npm run build` writes `dist/`. |
 | `demo` | The server-rendered demo. `demo/server.ts` and `demo/public/`. Config is `demo/oidc.json`. |
-| `scripts` | `configure-iya-sts.ts` registers the confidential client on iya-sts. `live_iya_sts.py` is the host Python live sign-in. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
+| `scripts` | `configure-iya-sts.ts`, the install script, registers the confidential client on iya-sts and writes the listener CA trust chain to the file `tlsCa` names. `trust-chain.mjs` holds `saveTrustChain()` and refreshes that file. `trust-chain.test.ts`: the chain is written whole to `tlsCa`'s path, and the library trusts a provider through it. `live_iya_sts.py` is the host Python live sign-in. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
 | `docs` | The GitHub Pages site. |
 | `tools/apidocs` | TypeDoc. It is outside the npm workspace. |
 | `Dockerfile`, `docker-compose.yml` | The demo image. Compose uses host networking. |
@@ -55,9 +55,21 @@ The unit suite is `docker build --target test .`. That stage runs `npm test` in 
 
 `.github/workflows/tests.yml` also builds the demo image and checks what it serves. That job publishes host port 3000. Do not run it while a demo is already bound there. The in-process commands above do not need the container.
 
-`python3 scripts/live_iya_sts.py` signs the demo in to a fresh iya-sts in memory mode, with persistence and clustering off and no request workers, unless `IYA_STS_URL` is already set. It uses the host's Python and Docker. It does not import this library and does not run Node on the host. `scripts/configure-iya-sts.ts` runs inside the demo image (`docker run --network host` with the image entrypoint). The demo container is `oidc-caep-risc-nodejs-live-demo`. `IYA_STS_URL` uses a running iya-sts and does not stop it. `IYA_STS_IMAGE` starts a fresh `iya-sts-live-oidc-caep-risc-nodejs` container from that image. With neither, it clones and builds iya-sts main, which is what the nightly run does. `LIVE_STS_PORT` (default 18501) and `LIVE_DEMO_PORT` (default 18601) pick the ports. A second run against an iya-sts that already has the client fails, so use a fresh one. Do not bind port 3000 or 8081.
+`python3 scripts/live_iya_sts.py` signs the demo in to a fresh iya-sts in memory mode, with persistence and clustering off and no request workers, unless `IYA_STS_URL` is already set. It uses the host's Python and Docker. It does not import this library and does not run Node on the host. It copies the checkout to a scratch build context, builds the demo image, runs `scripts/configure-iya-sts.ts` inside it (`docker run --network host`), which writes the `tlsCa` chain into the context, then builds the image again, checks it carries that chain (and nothing else from `demo/generated`), and starts the demo with only the client secret mounted and `TLS_CA_REFRESH=0`. It never rewrites `tlsCa` or fetches the CA for the demo. The demo container is `oidc-caep-risc-nodejs-live-demo`. `IYA_STS_URL` uses a running iya-sts and does not stop it. `IYA_STS_IMAGE` starts a fresh `iya-sts-live-oidc-caep-risc-nodejs` container from that image. With neither, it clones and builds iya-sts main, which is what the nightly run does. `LIVE_STS_PORT` (default 18545) and `LIVE_DEMO_PORT` (default 18645) pick the ports. A second run against an iya-sts that already has the client fails, so use a fresh one. Do not bind port 3000, 8081, or 18481 to 18495.
 
 `.github/workflows/nightly.yml` runs `docker build --target test .`, then the live script, on the cron `3 6 * * *` and on `workflow_dispatch`. `tests.yml` stays the push and pull-request CI.
+
+## The iya-sts trust chain (`tlsCa`)
+
+`tlsCa` in `demo/oidc.json` names the iya-sts TLS listener CA trust chain the library trusts. The default is `generated/idp-ca.pem`, relative to `demo/`. The value may also be `file:<path>`, `env:<NAME>`, or the PEM itself. The library trusts every certificate in it, in addition to Node's own store.
+
+`scripts/configure-iya-sts.ts`, the install script, writes that file. It saves the whole chain iya-sts publishes at `GET /tls/server-certificate` (leaf, TLS Issuing CA, Intermediate, Root), or the chain from the TLS handshake when that path does not answer. It prints the path, the trust anchor's subject and its SHA-256 fingerprint. Compare the anchor with the Root CA on iya-sts's PKI page.
+
+The demo image build copies that file into the image at `/app/demo/generated/idp-ca.pem`, so the image trusts that iya-sts with no bind mount and no fetch. Run the install script before you build the image. Rebuild the image after running the install script against a different iya-sts. `.dockerignore` admits only that file from `demo/generated`; the client secret stays out of the image. A build with no chain file yet (a fresh clone, CI's `--target test`) still succeeds; the image then has no `tlsCa` file.
+
+The mechanism is `COPY demo demo` plus `.dockerignore`'s `demo/generated/*` and `!demo/generated/idp-ca.pem`. Do not replace it with a COPY that names the file or globs for it: when the file is absent, BuildKit fails on the missing path and the classic builder fails with "no source files were specified". A directory COPY of `demo/` (which always exists) succeeds in both.
+
+The container entrypoint also refreshes the file from the provider at start, because a development iya-sts makes a new CA when it restarts. A failed refresh keeps the file from the build. `TLS_CA_REFRESH=0` turns the refresh off. `node scripts/trust-chain.mjs --config demo/oidc.json` refreshes it by hand. Compose still mounts `demo/generated` (for the client secret), which hides the image's copy behind the host's file.
 
 ## Demo
 
