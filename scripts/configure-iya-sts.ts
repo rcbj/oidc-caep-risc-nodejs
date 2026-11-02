@@ -33,7 +33,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { send } from '../packages/oidc-caep-risc-nodejs/src/http.ts';
 import { demoPort, redirectsFor } from './redirects.mjs';
-import { saveTrustChain, trustPath } from './trust-chain.mjs';
+import { saveTrustChain, trustNote, trustPath } from './trust-chain.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -402,6 +402,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     const chain = await saveTrustChain(origin, files.tlsCa);
     ca = chain.pem;
     console.log(`Saved ${origin}'s listener CA trust chain (${chain.count} certificate(s)) to ${files.tlsCa}`);
+    console.log(`  ${trustNote(chain)}`);
     console.log(`  trust anchor ${chain.anchor.subject.replace(/\n/g, ', ')}`);
     console.log(`  sha256 ${chain.anchor.fingerprint256}`);
     console.log('  Compare the anchor with the Root CA on iya-sts\'s Server configuration, PKI page.');

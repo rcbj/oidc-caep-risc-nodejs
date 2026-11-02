@@ -56,7 +56,7 @@ The demo image build copies that file into the image at `/app/demo/generated/idp
 
 The mechanism is `COPY demo demo` plus `.dockerignore`'s `demo/generated/*` and `!demo/generated/idp-ca.pem`. Do not replace it with a COPY that names the file or globs for it: when the file is absent, BuildKit fails on the missing path and the classic builder fails with "no source files were specified". A directory COPY of `demo/` (which always exists) succeeds in both.
 
-The container entrypoint also refreshes the file from the provider at start, because a development iya-sts makes a new CA when it restarts. A failed refresh keeps the file from the build. `TLS_CA_REFRESH=0` turns the refresh off. `node scripts/trust-chain.mjs --config demo/oidc.json` refreshes it by hand. Compose still mounts `demo/generated` (for the client secret), which hides the image's copy behind the host's file.
+The container entrypoint also refreshes the file from the provider at start, because a development iya-sts makes a new CA when it restarts. A failed refresh keeps the file from the build. The refresh verifies the provider against the chain the file already holds; only when that chain cannot verify it (no file yet, or a new CA) does it take the provider's chain on first use, still checking that it names the host and is signed link by link, and it prints the root's SHA-256 to compare with iya-sts's PKI page. `TLS_CA_REFRESH=0` turns the refresh off. `node scripts/trust-chain.mjs --config demo/oidc.json` refreshes it by hand. Compose still mounts `demo/generated` (for the client secret), which hides the image's copy behind the host's file.
 
 ## Live sign-in
 

@@ -147,7 +147,7 @@ describe('configure-iya-sts', () => {
 
   it('saves the published listener CA trust chain, and the handshake when that document is absent', async () => {
     const work = mkdtempSync(join(tmpdir(), 'oidc-chain-'));
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-keyout', join(work, 'key.pem'), '-out', join(work, 'cert.pem'), '-days', '1', '-nodes', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-keyout', join(work, 'key.pem'), '-out', join(work, 'cert.pem'), '-days', '1', '-nodes', '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost'], { stdio: 'ignore' });
     const certificatePem = readFileSync(join(work, 'cert.pem'), 'utf8');
     const key = readFileSync(join(work, 'key.pem'));
     const leaf = new X509Certificate(certificatePem);
