@@ -51,11 +51,22 @@ function bundleOf(certs) {
   };
 }
 
-// How each fetch decides whom to trust. With `ca`, Node verifies the chain against it and checks the
-// host name, as any other HTTPS client does. Without one, the fetch is trust on first use: there is
-// no anchor yet, so the handshake is not verified, and acceptFirstUse() below checks what it can.
-function trustOptions(ca) {
-  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
+// How each fetch decides whom to trust. With `ca` (the chain the tlsCa file already holds), the
+// handshake is checked against it: Node still verifies the chain against `ca` when it does not refuse
+// the connection itself, and heldChainRefusal() turns an unverified chain or a host name the leaf does
+// not carry into an error before anything is read. Without `ca`, the fetch is trust on first use:
+// there is no anchor yet, and acceptFirstUse() below checks what it can.
+export function heldChainRefusal(socket, hostname, ca) {
+  if (!ca) return undefined;
+  if (!socket.authorized) {
+    const code = String(socket.authorizationError?.code ?? socket.authorizationError ?? 'CERT_UNTRUSTED');
+    const named = code === 'ERR_TLS_CERT_ALTNAME_INVALID'
+      ? checkServerIdentity(hostname, socket.getPeerCertificate())
+      : undefined;
+    if (named) return named;
+    return Object.assign(new Error(`the chain in the trust file does not verify the server: ${code}`), { code });
+  }
+  return checkServerIdentity(hostname, socket.getPeerCertificate()) ?? undefined;
 }
 
 /** `GET /tls/server-certificate`, and the leaf the handshake presented. */
@@ -69,12 +80,19 @@ function fetchPublished(origin, ca) {
       path: `${target.pathname}${target.search}`,
       method: 'GET',
       agent: false,
-      ...trustOptions(ca),
+      ...(ca ? { ca } : {}),
+      rejectUnauthorized: false,
       minVersion: 'TLSv1.2',
       timeout: TIMEOUT_MS,
       ...(servername ? { servername } : {}),
       headers: { accept: 'text/plain' },
     }, (res) => {
+      const refusal = heldChainRefusal(res.socket, target.hostname, ca);
+      if (refusal) {
+        res.destroy();
+        reject(refusal);
+        return;
+      }
       const presented = res.socket.getPeerCertificate();
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
@@ -107,13 +125,15 @@ function fetchHandshake(origin, ca) {
       host: target.hostname,
       port: Number(target.port || 443),
       ...(servername ? { servername } : {}),
-      ...trustOptions(ca),
+      ...(ca ? { ca } : {}),
+      rejectUnauthorized: false,
       minVersion: 'TLSv1.2',
     }, () => {
       const certs = [];
       const seen = new Set();
       let current = socket.getPeerCertificate(true);
-      while (current?.raw && current.fingerprint256 && !seen.has(current.fingerprint256)) {
+      const refusal = heldChainRefusal(socket, target.hostname, ca);
+      while (!refusal && current?.raw && current.fingerprint256 && !seen.has(current.fingerprint256)) {
         seen.add(current.fingerprint256);
         certs.push(new X509Certificate(current.raw));
         const next = current.issuerCertificate;
@@ -121,6 +141,10 @@ function fetchHandshake(origin, ca) {
         current = next;
       }
       socket.end();
+      if (refusal) {
+        reject(refusal);
+        return;
+      }
       resolvePromise({ certs, leaf: certs[0] });
     });
     socket.setTimeout(TIMEOUT_MS, () => {
