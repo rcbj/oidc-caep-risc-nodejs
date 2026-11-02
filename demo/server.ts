@@ -679,7 +679,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
 const server = http.createServer((req, res) => {
   handle(req, res).catch((err: Error) => {
-    console.error(err);
+    // The stack, not the error object: an OidcError also carries the provider's OAuth error, and the
+    // object's fields are not logged (CodeQL js/clear-text-logging).
+    console.error(`request failed: ${err.stack ?? err.message}`);
     if (!res.headersSent) send(res, 500, page('Error', `<h1>Something went wrong</h1><p class="problem">${esc(err.message)}</p><p><a href="/">Home</a></p>`));
     else res.end();
   });

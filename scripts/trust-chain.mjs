@@ -59,6 +59,7 @@ function fetchPublished(origin) {
       path: `${target.pathname}${target.search}`,
       method: 'GET',
       rejectUnauthorized: false,
+      minVersion: 'TLSv1.2',
       timeout: TIMEOUT_MS,
       ...(servername ? { servername } : {}),
       headers: { accept: 'text/plain' },
@@ -93,6 +94,7 @@ function fetchHandshake(origin) {
       port: Number(target.port || 443),
       ...(servername ? { servername } : {}),
       rejectUnauthorized: false,
+      minVersion: 'TLSv1.2',
     }, () => {
       const certs = [];
       const seen = new Set();

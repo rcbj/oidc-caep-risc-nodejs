@@ -37,13 +37,13 @@ It also turns on `authn.multipleAccounts`, so one browser can hold several signe
 
 ## The secret, and running it again
 
-The secret is written to `demo/generated/client-secret` (mode 0600) only when that file is missing and the application is created now. A later run adds redirect URIs, grants, and scopes that are missing. It does not send a new secret.
+The secret is written to `demo/generated/client-secret` (created mode 0600, and never printed: a dry run's plan does not hold it) only when that file is missing and the application is created now. A later run adds redirect URIs, grants, and scopes that are missing. It does not send a new secret.
 
 If the application already exists and the secret file is missing, the script stops. It will not rotate the secret out from under a deployment that still has the old one.
 
 ## The test user
 
-The user is `oidc-demo-user` (pass `--test-user` to choose another, or `--no-test-user` to skip). The attributes are `cn`, `givenName`, `sn`, `displayName`, and `mail`, which is what a product-mode realm requires. The password is `OIDC_DEMO_USER_PASSWORD`, or one is generated and printed once. An existing user keeps its password unless that variable is set. The user is added to `ssf-read` and `ssf-manage`.
+The user is `oidc-demo-user` (pass `--test-user` to choose another, or `--no-test-user` to skip). The attributes are `cn`, `givenName`, `sn`, `displayName`, and `mail`, which is what a product-mode realm requires. The password is `OIDC_DEMO_USER_PASSWORD`, or iya-sts generates one; the script writes a generated one to `demo/generated/oidc-demo-user.password` (created mode 0600) and prints only that path, never the password. An existing user keeps its password unless that variable is set. The user is added to `ssf-read` and `ssf-manage`.
 
 This is a different user from oidc-caep-client's `caep-demo-user` and from saml2-sp-nodejs's `saml-demo-user`.
 
