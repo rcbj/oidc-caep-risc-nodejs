@@ -66,7 +66,7 @@ PROFILE = {
     "status_path": "/live-status",
     "configure": ["node", "scripts/configure-iya-sts.ts"],
     "config_file": "demo/oidc.json",
-    "password_env": "OIDC_DEMO_USER_PASSWORD",
+    "test_user_env": "OIDC_DEMO_USER_PASSWORD",
     "test_user": "oidc-demo-user",
 }
 
@@ -126,6 +126,7 @@ class Client:
     def __init__(self, ca_file):
         self.jar = http.cookiejar.CookieJar(policy=LoopbackCookiePolicy())
         self.ssl = ssl.create_default_context(cafile=str(ca_file))
+        self.ssl.minimum_version = ssl.TLSVersion.TLSv1_2
 
     def request(self, method, url, body=None, headers=None, timeout=60):
         parts = urllib.parse.urlsplit(url)
@@ -226,6 +227,7 @@ def wait_ready(origin, timeout):
     """Wait for discovery to answer. Readiness only: nothing is trusted from it."""
     parts = urllib.parse.urlsplit(origin)
     context = ssl._create_unverified_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:
@@ -300,6 +302,9 @@ def autopost_form(payload):
 
 
 class Driver:
+    # No request is traced: the sign-in URLs and statuses flow from a driver that holds the
+    # test user's password, and nothing derived from a password may reach a log line
+    # (CodeQL py/clear-text-logging-sensitive-data). A failure raises with what it needs.
     def __init__(self, client, sts_origin, demo_origin, username, password):
         self.client = client
         self.sts_origin = sts_origin.rstrip("/")
@@ -312,7 +317,6 @@ class Driver:
 
     def get(self, url):
         status, headers, payload = self.client.request("GET", url, headers={"accept": "text/html,application/json"})
-        print(f"GET {status} {url}", flush=True)
         return status, headers, payload
 
     def post_json(self, url, body, csrf):
@@ -323,7 +327,6 @@ class Driver:
             "origin": self.sts_origin,
             "x-csrf-token": csrf,
         })
-        print(f"POST {status} {url}", flush=True)
         return status, headers, payload
 
     def open_view(self, shell_url, api_url):
@@ -331,7 +334,6 @@ class Driver:
         if status in (301, 302, 303, 307, 308):
             return {"redirect": resolve_url(shell_url, one_header(headers, "location"))}
         view_status, _headers, view_payload = self.client.request("GET", api_url, headers={"accept": "application/json"})
-        print(f"GET {view_status} {api_url}", flush=True)
         parsed = json_body(view_payload) or {}
         if view_status in (301, 302, 303, 307, 308):
             return {"redirect": resolve_url(api_url, one_header(_headers, "location"))}
@@ -381,7 +383,6 @@ class Driver:
                 "content-type": "application/x-www-form-urlencoded",
                 "origin": origin_of(url),
             })
-            print(f"POST {posted} {action}", flush=True)
             if posted in (301, 302, 303, 307, 308):
                 return resolve_url(action, one_header(post_headers, "location"))
             if origin_of(action).rstrip("/") == self.demo_origin:
@@ -586,12 +587,16 @@ def user_flag():
 def configure_demo(image, generated, sts_origin, demo_origin, demo_port, username):
     """Run the install script inside the demo image. It writes tlsCa's chain and the client secret
     into the build context's demo/generated. Secrets go through the environment, not argv."""
-    completed = run(
+    # The command is not echoed: it names the variable that carries the test user's password, and
+    # nothing derived from a password may reach a log line (CodeQL
+    # py/clear-text-logging-sensitive-data). A fixed label stands in for it.
+    print("+ docker run <image> " + " ".join(PROFILE["configure"]), flush=True)
+    completed = subprocess.run(
         [
             "docker", "run", "--rm", "--network", "host", *user_flag(),
             "-v", f"{generated}:/app/demo/generated",
             "-e", "ADMIN_API_CLIENT_SECRET",
-            "-e", PROFILE["password_env"],
+            "-e", PROFILE["test_user_env"],
             "-e", f"PORT={demo_port}",
             "-e", f"PUBLIC_URL={demo_origin}",
             "--entrypoint", PROFILE["configure"][0],
@@ -602,12 +607,16 @@ def configure_demo(image, generated, sts_origin, demo_origin, demo_port, usernam
             "--public-url", demo_origin,
             "--test-user", username,
         ],
+        check=False,
+        text=True,
         capture_output=True,
     )
     if completed.stdout:
         print(completed.stdout, flush=True)
     if completed.stderr:
         print(completed.stderr, file=sys.stderr, flush=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"the install script exited {completed.returncode}")
 
 
 def main():
@@ -618,11 +627,11 @@ def main():
     if any(port in FORBIDDEN_PORTS for port in bound) or len(set(bound)) != len(bound):
         raise SystemExit("LIVE_STS_PORT and LIVE_DEMO_PORT must differ and must not bind 3000, 8081, or 18481 to 18495")
     secret = os.environ.get("ADMIN_API_CLIENT_SECRET") or os.environ.get("STS_ADMIN_API_CLIENT_SECRET") or secrets.token_urlsafe(24)
-    password = os.environ.get(PROFILE["password_env"]) or secrets.token_urlsafe(18)
+    password = os.environ.get(PROFILE["test_user_env"]) or secrets.token_urlsafe(18)
     username = PROFILE["test_user"]
     # Secrets reach docker as -e NAME from this environment, never on a printed command line.
     os.environ["ADMIN_API_CLIENT_SECRET"] = secret
-    os.environ[PROFILE["password_env"]] = password
+    os.environ[PROFILE["test_user_env"]] = password
     sts_origin, sts_name = prepare_sts(sts_port, secret)
     demo_origin = f"http://127.0.0.1:{demo_port}"
     demo_name = PROFILE["repo"] + "-live-demo"

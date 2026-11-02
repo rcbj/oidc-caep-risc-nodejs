@@ -2,7 +2,7 @@
 /**
  * Registers the demo as a confidential OpenID Connect client on a running iya-sts.
  *
- *   1. the client secret, if demo/generated/client-secret does not exist yet (32 bytes, mode 0600).
+ *   1. the client secret, if demo/generated/client-secret does not exist yet (32 bytes, created 0600).
  *      A re-run does not rotate it: an application that already exists is left with the secret it has;
  *   2. the listener's CA trust chain, written to the configuration's tlsCa file on every run. The
  *      bundle is GET /tls/server-certificate (leaf, intermediates, and the root). The handshake's
@@ -14,7 +14,9 @@
  *   4. membership of SSF_READ and SSF_MANAGE for whichever of ssf.read and ssf.manage the scopes name.
  *      signals: false ignores those two scopes, so those roles are not registered and the test user
  *      is not put in those groups. No transmitter is registered. authn.multipleAccounts is set either way;
- *   5. a test user, oidc-demo-user, in ssf-read and ssf-manage when those scopes are in use.
+ *   5. a test user, oidc-demo-user, in ssf-read and ssf-manage when those scopes are in use. A
+ *      password iya-sts generates for it is written to demo/generated/<user>.password (mode 0600),
+ *      never printed; only that path is.
  *
  *   ADMIN_API_CLIENT_SECRET=… node scripts/configure-iya-sts.ts
  *   node scripts/configure-iya-sts.ts --config demo/oidc.json --dry-run
@@ -26,7 +28,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fchmodSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { send } from '../packages/oidc-caep-risc-nodejs/src/http.ts';
@@ -56,8 +58,9 @@ export function usage(): string {
                   (default: unset; $PUBLIC_URL). Without it, a loopback redirect follows the
                   running demo's PORT, then $PORT. A non-loopback redirect is left as written.
   --test-user     The test user to create (default: oidc-demo-user). Its password is
-                  $OIDC_DEMO_USER_PASSWORD, or one is generated and printed once. With that variable
-                  set, an existing user's password is replaced.
+                  $OIDC_DEMO_USER_PASSWORD, or one is generated and written to
+                  demo/generated/<user>.password (mode 0600); only that path is printed. With that
+                  variable set, an existing user's password is replaced.
   --no-test-user  Do not create a test user.
   --dry-run       Print what would be done, and send nothing. Does not write a secret.
 
@@ -198,10 +201,13 @@ export interface Call {
   when: 'create' | 'exists' | 'always';
 }
 
-export function applicationFields(files: DemoFiles, clientSecret: string): Record<string, unknown> {
+/**
+ * The application's fields, without its client secret. The secret joins the create call only as it
+ * is sent (main()), so the plan, which --dry-run prints and errors quote, never holds it.
+ */
+export function applicationFields(files: DemoFiles): Record<string, unknown> {
   return {
     oauthClientId: files.clientId,
-    oauthClientSecret: clientSecret,
     oauthRedirectUri: [files.redirectUri],
     oauthPostLogoutRedirectUri: [files.postLogoutRedirectUri],
     oauthResponseType: ['code'],
@@ -223,11 +229,11 @@ export function userAttributes(username: string): Record<string, string> {
 }
 
 /**
- * The management API calls. The create call carries the client secret. The calls marked `exists`
- * add the same values except the secret, so a re-run does not rotate it.
+ * The management API calls. None holds the client secret: main() adds it to the create call as it
+ * sends it. The calls marked `exists` add the same values, so a re-run does not rotate it.
  */
-export function planFor(files: DemoFiles, base: string, testUser: string, clientSecret: string): Call[] {
-  const fields = applicationFields(files, clientSecret);
+export function planFor(files: DemoFiles, base: string, testUser: string): Call[] {
+  const fields = applicationFields(files);
   const calls: Call[] = [
     {
       method: 'POST', path: `${base}/admin-api/applications/create`, when: 'create',
@@ -248,7 +254,6 @@ export function planFor(files: DemoFiles, base: string, testUser: string, client
     });
   }
   for (const [attribute, raw] of Object.entries(fields)) {
-    if (attribute === 'oauthClientSecret') continue;
     const values = Array.isArray(raw) ? raw.map(String) : [String(raw)];
     for (const value of values) {
       calls.push({
@@ -319,10 +324,32 @@ async function mintAdminToken(base: string, ca: string | undefined, secret: stri
   return reply.body.access_token;
 }
 
-function writeSecret(path: string, secret: string): void {
+/**
+ * The file a generated test-user password is written to: <directory>/<username>.password. It is
+ * computed apart from the password, so the path the script prints is not derived from one.
+ */
+export function generatedFile(directory: string, username: string): string {
+  if (!username || /[/\\]/.test(username) || username === '.' || username === '..') {
+    throw new Error(`${JSON.stringify(username)} cannot name a file`);
+  }
+  return resolve(directory, `${username}.password`);
+}
+
+/**
+ * Writes text to path, readable and writable by its owner only. The file is CREATED 0600, so it is
+ * never readable by anyone else, not even for a moment; an existing file is narrowed to 0600 before
+ * it is rewritten. A generated password goes here and is never printed: a password does not belong
+ * in a log. demo/generated never enters an image except the IdP trust chain (.dockerignore).
+ */
+export function writePrivate(path: string, text: string): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${secret}\n`, { mode: 0o600 });
-  chmodSync(path, 0o600);
+  const fd = openSync(path, 'w', 0o600);
+  try {
+    fchmodSync(fd, 0o600);
+    writeSync(fd, text);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** PORT from the running oidc-demo container, when compose has one. Docker being absent is not an error. */
@@ -360,11 +387,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const onDisk = existsSync(files.secretFile) ? readFileSync(files.secretFile, 'utf8').trim() : '';
   if (args.dryRun) {
     if (files.tlsCa) console.log(`# would save ${origin}'s listener CA trust chain to ${files.tlsCa}`);
-    if (!onDisk) console.log(`# would write a new client secret to ${files.secretFile} (mode 0600)`);
-    else console.log(`# would keep the client secret at ${files.secretFile}`);
-    for (const call of planFor(files, base, args.testUser, onDisk || '<a new client secret>')) {
-      const printed = JSON.stringify(call.body ?? {}, null, 2).replaceAll(onDisk || '<a new client secret>', '<client secret>');
-      console.log(`${call.method} ${call.path}  # ${call.when}: ${call.why}\n${printed}`);
+    if (!onDisk) console.log(`# would write a new client secret (mode 0600) to the file clientSecret names in ${args.config}`);
+    else console.log(`# would keep the client secret in the file clientSecret names in ${args.config}`);
+    // The plan holds no client secret, so nothing printed here is derived from one.
+    console.log('# the create call also sends the client secret as oauthClientSecret (not shown)');
+    for (const call of planFor(files, base, args.testUser)) {
+      console.log(`${call.method} ${call.path}  # ${call.when}: ${call.why}\n${JSON.stringify(call.body ?? {}, null, 2)}`);
     }
     return;
   }
@@ -395,17 +423,18 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   const minted = !onDisk;
   const secret = onDisk || randomBytes(32).toString('base64url');
-  const plan = planFor(files, base, args.testUser, secret);
-  const create = plan.find((call) => call.when === 'create');
-  const created = await api('/applications/create', create?.body);
+  const plan = planFor(files, base, args.testUser);
+  const create = plan.find((call) => call.when === 'create')?.body as { fields: Record<string, unknown> };
+  // The secret joins a copy of the create body as it is sent; the plan never holds it.
+  const created = await api('/applications/create', { ...create, fields: { ...create.fields, oauthClientSecret: secret } });
   let fresh = false;
   if (created.body.ok) {
     fresh = true;
-    if (minted) writeSecret(files.secretFile, secret);
-    console.log(`Registered ${files.clientId}. The client secret is ${files.secretFile}.`);
+    if (minted) writePrivate(files.secretFile, `${secret}\n`);
+    console.log(`Registered ${files.clientId}. Its client secret is in the file clientSecret names in ${args.config} (mode 0600).`);
   } else if (errorsOf(created.body).some((e) => /already in this registry/i.test(e))) {
     if (minted) {
-      throw new Error(`${files.clientId} already exists, and ${files.secretFile} is missing. This script does not rotate the client secret. Restore that file, or set a new secret on the application, then re-run.`);
+      throw new Error(`${files.clientId} already exists, and the file clientSecret names in ${args.config} is missing. This script does not rotate the client secret. Restore that file, or set a new secret on the application, then re-run.`);
     }
     console.log(`${files.clientId} is already registered; adding the demo's values. The client secret is unchanged.`);
     for (const call of plan.filter((one) => one.when === 'exists')) {
@@ -441,7 +470,13 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       const made = await api('/users/create', body);
       if (!made.body.ok) throw new Error(`creating ${args.testUser} was refused: ${JSON.stringify(made.body).slice(0, 300)}`);
       console.log(`Created user ${args.testUser}.`);
-      if (made.body.password) console.log(`Generated password for ${args.testUser} (shown once): ${String(made.body.password)}`);
+      if (made.body.password) {
+        // rcbj: a generated password is never printed. It goes to a file only its owner can read,
+        // and only the path, which does not depend on the password, is printed.
+        const saved = generatedFile(resolve(dirname(resolve(args.config)), 'generated'), args.testUser);
+        writePrivate(saved, `${String(made.body.password)}\n`);
+        console.log(`Generated a password for ${args.testUser}; it is in ${saved} (readable by you only).`);
+      }
     }
     for (const call of plan.filter((one) => one.path.endsWith('/groups/add-member'))) {
       const added = await api('/groups/add-member', call.body);

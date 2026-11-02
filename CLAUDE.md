@@ -81,7 +81,7 @@ ADMIN_API_CLIENT_SECRET=… OIDC_DEMO_USER_PASSWORD=… npm run configure-iya-st
 docker compose up --build
 ```
 
-Open <http://localhost:3000> and sign in as `oidc-demo-user`.
+Open <http://localhost:3000> and sign in as `oidc-demo-user`. Unless `OIDC_DEMO_USER_PASSWORD` sets its password, iya-sts generates one, and the install script writes it to `demo/generated/oidc-demo-user.password` (created mode 0600) and prints only that path, never the password.
 
 `GET /live-status` returns JSON: `signedIn`, `subject`, `receiver`, and `events` (`type` and `jti` only). No access token, refresh token, or ID token. The receiver records every accepted event before it starts polling. `session-revoked` ends the matching local session, so `signedIn` is false.
 
