@@ -49,7 +49,7 @@ npm run build
 npm run version:check
 ```
 
-`npm test` runs `node:test` on the TypeScript sources in `packages/oidc-caep-risc-nodejs/test` and on `scripts/*.test.ts`. The library tests use a stub provider and a stub transmitter. `version:check` fails unless every manifest is `M.N.0`.
+`npm test` builds the library first (`pretest`: `scripts/demo-errors.test.ts` runs the demo, which imports the built package), then runs `node:test` on the TypeScript sources in `packages/oidc-caep-risc-nodejs/test` and on `scripts/*.test.ts`. The library tests use a stub provider and a stub transmitter. `version:check` fails unless every manifest is `M.N.0`.
 
 The unit suite is `docker build --target test .`. That stage runs `npm test` in the image. It is not the default target, so `docker build .` and `docker compose build` still produce the demo.
 
