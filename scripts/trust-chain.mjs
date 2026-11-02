@@ -1,7 +1,10 @@
 // Fetches the provider's listener CA trust chain and writes the file the configuration's tlsCa names.
 // iya-sts publishes that bundle at GET /tls/server-certificate: the listener certificate, the
-// intermediates, and the root. The first fetch does not verify TLS; there is nothing to verify it
-// against until this file exists. If that document is missing, the handshake's own chain is used.
+// intermediates, and the root. When the file already holds a chain, the fetch is verified against
+// it. Only when it cannot be (no file yet, or a development iya-sts that made a new CA) is the chain
+// taken on first use: unverified, but it must name the host, start with the certificate the handshake
+// presented, and be signed link by link; compare the printed SHA-256 with iya-sts's PKI page. If that
+// document is missing, the handshake's own chain is used.
 //
 //   node scripts/trust-chain.mjs --config demo/oidc.json
 //
@@ -9,11 +12,11 @@
 // demo still starts. scripts/configure-iya-sts.ts calls saveTrustChain and does report a failure.
 
 import { X509Certificate } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import https from 'node:https';
 import { isIP } from 'node:net';
 import { dirname, isAbsolute, resolve } from 'node:path';
-import { connect } from 'node:tls';
+import { checkServerIdentity, connect } from 'node:tls';
 import { pathToFileURL } from 'node:url';
 
 const TIMEOUT_MS = 10_000;
@@ -48,8 +51,15 @@ function bundleOf(certs) {
   };
 }
 
-/** `GET /tls/server-certificate`. Verification is off: this fetch is what makes the next one possible. */
-function fetchPublished(origin) {
+// How each fetch decides whom to trust. With `ca`, Node verifies the chain against it and checks the
+// host name, as any other HTTPS client does. Without one, the fetch is trust on first use: there is
+// no anchor yet, so the handshake is not verified, and acceptFirstUse() below checks what it can.
+function trustOptions(ca) {
+  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
+}
+
+/** `GET /tls/server-certificate`, and the leaf the handshake presented. */
+function fetchPublished(origin, ca) {
   const target = new URL('/tls/server-certificate', origin);
   return new Promise((resolvePromise, reject) => {
     const servername = servernameOf(target.hostname);
@@ -58,12 +68,14 @@ function fetchPublished(origin) {
       port: target.port || 443,
       path: `${target.pathname}${target.search}`,
       method: 'GET',
-      rejectUnauthorized: false,
+      agent: false,
+      ...trustOptions(ca),
       minVersion: 'TLSv1.2',
       timeout: TIMEOUT_MS,
       ...(servername ? { servername } : {}),
       headers: { accept: 'text/plain' },
     }, (res) => {
+      const presented = res.socket.getPeerCertificate();
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
       res.on('end', () => {
@@ -72,7 +84,9 @@ function fetchPublished(origin) {
           return;
         }
         try {
-          resolvePromise(bundleOf(certificatesOf(Buffer.concat(chunks).toString('utf8'))));
+          const certs = certificatesOf(Buffer.concat(chunks).toString('utf8'));
+          const leaf = presented?.raw ? new X509Certificate(presented.raw) : undefined;
+          resolvePromise({ certs, leaf });
         } catch (err) {
           reject(err);
         }
@@ -85,7 +99,7 @@ function fetchPublished(origin) {
 }
 
 /** Every certificate the handshake presented, leaf first, including the root when the server sends it. */
-function fetchHandshake(origin) {
+function fetchHandshake(origin, ca) {
   const target = new URL(origin);
   return new Promise((resolvePromise, reject) => {
     const servername = servernameOf(target.hostname);
@@ -93,7 +107,7 @@ function fetchHandshake(origin) {
       host: target.hostname,
       port: Number(target.port || 443),
       ...(servername ? { servername } : {}),
-      rejectUnauthorized: false,
+      ...trustOptions(ca),
       minVersion: 'TLSv1.2',
     }, () => {
       const certs = [];
@@ -107,11 +121,7 @@ function fetchHandshake(origin) {
         current = next;
       }
       socket.end();
-      try {
-        resolvePromise(bundleOf(certs));
-      } catch (err) {
-        reject(err);
-      }
+      resolvePromise({ certs, leaf: certs[0] });
     });
     socket.setTimeout(TIMEOUT_MS, () => {
       socket.destroy();
@@ -121,21 +131,92 @@ function fetchHandshake(origin) {
   });
 }
 
-/** The published trust chain, or the handshake's chain when that document is not served. */
-export async function fetchTrustChain(origin) {
-  try {
-    return await fetchPublished(origin);
-  } catch {
-    return fetchHandshake(origin);
+/**
+ * What a first use can still check without an anchor: the leaf names the host, the handshake presented
+ * that leaf, and every certificate is signed by the next one up, the top one by itself if it is self-issued.
+ */
+export function acceptFirstUse(hostname, fetched) {
+  const { certs, leaf } = fetched;
+  if (!certs.length) throw new Error('the trust chain has no certificates');
+  if (!leaf || leaf.fingerprint256 !== certs[0].fingerprint256) {
+    throw new Error('the published trust chain does not start with the certificate the handshake presented');
+  }
+  const mismatch = checkServerIdentity(hostname, certs[0].toLegacyObject());
+  if (mismatch) throw mismatch;
+  for (let i = 0; i + 1 < certs.length; i += 1) {
+    if (!certs[i].checkIssued(certs[i + 1]) || !certs[i].verify(certs[i + 1].publicKey)) {
+      throw new Error(`certificate ${i + 1} of the trust chain is not signed by certificate ${i + 2}`);
+    }
+  }
+  const top = certs[certs.length - 1];
+  if (top.subject === top.issuer && !top.verify(top.publicKey)) {
+    throw new Error('the trust chain\'s self-issued top certificate does not verify its own signature');
   }
 }
 
-/** Writes the chain to `dest`, replacing whatever was there. */
+/** The published trust chain, or the handshake's chain when that document is not served. */
+async function fetchChain(origin, ca) {
+  try {
+    return await fetchPublished(origin, ca);
+  } catch (err) {
+    if (ca && isVerificationFailure(err)) throw err;
+    return fetchHandshake(origin, ca);
+  }
+}
+
+// The errors that mean the anchor in hand does not lead to the server's chain: a development iya-sts
+// makes a new CA when it restarts. A host name the certificate does not carry is not one of them.
+const UNVERIFIED = new Set([
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'CERT_SIGNATURE_FAILURE',
+  'CERT_UNTRUSTED',
+]);
+
+function isVerificationFailure(err) {
+  return UNVERIFIED.has(err?.code);
+}
+
+function anchorFile(dest) {
+  if (!dest || !existsSync(dest)) return undefined;
+  const pem = readFileSync(dest, 'utf8');
+  return certificatesOf(pem).length ? pem : undefined;
+}
+
+/**
+ * The server's trust chain. With `ca` (the tlsCa file's chain), verified against it; when that does
+ * not verify the server, or there is no `ca`, taken on first use, after acceptFirstUse()'s checks.
+ * `verified` says which.
+ */
+export async function fetchTrustChain(origin, ca) {
+  if (ca) {
+    try {
+      return { ...bundleOf((await fetchChain(origin, ca)).certs), verified: true };
+    } catch (err) {
+      if (!isVerificationFailure(err)) throw err;
+    }
+  }
+  const fetched = await fetchChain(origin, undefined);
+  acceptFirstUse(new URL(origin).hostname, fetched);
+  return { ...bundleOf(fetched.certs), verified: false };
+}
+
+/** Writes the chain to `dest`, replacing whatever was there, verified against what was there if it can be. */
 export async function saveTrustChain(origin, dest) {
-  const chain = await fetchTrustChain(origin);
+  const chain = await fetchTrustChain(origin, anchorFile(dest));
   mkdirSync(dirname(dest), { recursive: true });
   writeFileSync(dest, chain.pem);
   return { ...chain, path: dest, origin };
+}
+
+/** One line for the operator: how this chain came to be trusted. */
+export function trustNote(saved) {
+  return saved.verified
+    ? 'verified against the chain the file already held'
+    : 'trusted on first use: compare the sha256 with the Root CA on iya-sts\'s PKI page';
 }
 
 function configFromArgv(argv) {
@@ -159,6 +240,7 @@ async function main() {
   if (!dest) throw new Error(`${configPath} tlsCa is not a file this process can update`);
   const saved = await saveTrustChain(new URL(metadataUrl).origin, dest);
   console.log(`Saved ${saved.origin}'s listener CA trust chain (${saved.count} certificate(s)) to ${saved.path}`);
+  console.log(`  ${trustNote(saved)}`);
   console.log(`  trust anchor ${saved.anchor.subject.replaceAll('\n', ', ')}`);
   console.log(`  sha256 ${saved.anchor.fingerprint256}`);
 }
