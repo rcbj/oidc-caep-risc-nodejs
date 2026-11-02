@@ -44,4 +44,10 @@ npm test
 npm run build
 ```
 
-Node.js 22.18 or later. The tests run the TypeScript sources as they are, against a stub provider. `npm run build` compiles the library to `dist/`.
+Node.js 22.18 or later. The tests run the TypeScript sources as they are, against a stub provider. `npm run build` compiles the library to `dist/`. The unit suite in a container is `docker build --target test .`. That target is not the default image, so `docker build .` still produces the demo.
+
+## Live sign-in
+
+`python3 scripts/live_iya_sts.py` signs the demo in to a fresh iya-sts and checks two Shared Signals events. It uses the host's Python and Docker. It does not import this library, and it does not run Node on the host. The demo image runs `node scripts/configure-iya-sts.ts` through its entrypoint (`docker run --network host`), then the demo. `GET /live-status` returns `signedIn`, `subject`, `receiver`, and `events` of `type` and `jti`. It carries no tokens. Every accepted event is recorded before the receiver polls. A `session-revoked` event leaves `signedIn` false. `IYA_STS_URL` uses a running iya-sts; `IYA_STS_IMAGE` starts one from that image; otherwise iya-sts main is cloned and built. `LIVE_STS_PORT` and `LIVE_DEMO_PORT` pick the ports (defaults 18501 and 18601).
+
+`.github/workflows/nightly.yml` runs `docker build --target test .`, then that script, at 06:03 UTC and on demand. Do not bind port 3000 or 8081. Push and pull-request CI stays [tests.yml](.github/workflows/tests.yml).
