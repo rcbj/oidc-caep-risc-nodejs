@@ -40,9 +40,9 @@ describe('configure-iya-sts', () => {
     assert.deepEqual(files.scopes, 'openid profile email offline_access ssf.read ssf.manage'.split(' '));
   });
 
-  it('registers a confidential client and does not send the secret again when the application exists', () => {
+  it('registers a confidential client, and no call in the plan holds the client secret', () => {
     const files = filesOf(config, 'http://localhost:3000');
-    const plan = planFor(files, 'https://localhost:8081', 'oidc-demo-user', 's3cret');
+    const plan = planFor(files, 'https://localhost:8081', 'oidc-demo-user');
     const create = plan.find((call) => call.when === 'create');
     assert.ok(create);
     assert.match(create.path, /\/admin-api\/applications\/create$/);
@@ -50,7 +50,7 @@ describe('configure-iya-sts', () => {
     assert.equal(body.identifier, 'oidc-caep-risc-demo');
     assert.equal(body.name, 'oidc-caep-risc-nodejs demo');
     assert.deepEqual(body.protocols, ['oauth2', 'oidc']);
-    assert.equal(body.fields.oauthClientSecret, 's3cret');
+    assert.equal('oauthClientSecret' in body.fields, false);
     assert.deepEqual(body.fields.oauthGrantType, [...GRANTS]);
     assert.deepEqual(body.fields.oauthResponseType, ['code']);
     assert.equal(body.fields.oauthTokenEndpointAuthMethod, 'client_secret_basic');
@@ -59,7 +59,7 @@ describe('configure-iya-sts', () => {
     assert.equal('appCorsOrigin' in body.fields, false);
     const again = plan.filter((call) => call.when === 'exists').map((call) => JSON.stringify(call.body));
     assert.ok(again.length > 0);
-    assert.ok(again.every((text) => !text.includes('s3cret') && !text.includes('oauthClientSecret')));
+    assert.ok(plan.every((call) => !JSON.stringify(call.body).includes('oauthClientSecret')));
     assert.deepEqual(plan.find((call) => call.path.endsWith('/config/set'))?.body, MULTIPLE_ACCOUNTS);
     const roles = plan.filter((call) => call.path.endsWith('/roles/add-member')).map((call) => (call.body as { role: string }).role);
     assert.deepEqual(roles, SSF_ROLES.map((role) => role.role));
@@ -68,7 +68,7 @@ describe('configure-iya-sts', () => {
     assert.deepEqual((user?.body as { attributes: Record<string, string> }).attributes, userAttributes('oidc-demo-user'));
     const groups = plan.filter((call) => call.path.endsWith('/groups/add-member')).map((call) => (call.body as { group: string }).group);
     assert.deepEqual(groups, ['ssf-read', 'ssf-manage']);
-    assert.equal(planFor(files, 'https://localhost:8081', '', 's3cret').some((call) => call.path.endsWith('/users/create')), false);
+    assert.equal(planFor(files, 'https://localhost:8081', '').some((call) => call.path.endsWith('/users/create')), false);
   });
 
   it('does not register Shared Signals roles when signals is false', () => {
@@ -85,7 +85,7 @@ describe('configure-iya-sts', () => {
     const files = filesOf(off, 'http://localhost:3000');
     assert.deepEqual(files.scopes, ['openid', 'profile', 'email', 'offline_access']);
     assert.equal(files.ssfTransmitter, undefined);
-    const plan = planFor(files, 'https://localhost:8081', 'oidc-demo-user', 's3cret');
+    const plan = planFor(files, 'https://localhost:8081', 'oidc-demo-user');
     assert.deepEqual(plan.filter((call) => call.path.endsWith('/roles/add-member')), []);
     assert.deepEqual(plan.filter((call) => call.path.endsWith('/groups/add-member')), []);
     const create = plan.find((call) => call.when === 'create');
@@ -140,7 +140,7 @@ describe('configure-iya-sts', () => {
     const redirects = redirectsFor(files.redirectUri, files.postLogoutRedirectUri, { publicUrlGiven: false, port: 3001 });
     files.redirectUri = redirects.redirectUri;
     files.postLogoutRedirectUri = redirects.postLogoutRedirectUri;
-    const body = planFor(files, 'https://localhost:8081', '', 's3cret').find((call) => call.when === 'create')?.body as { fields: { oauthRedirectUri: string[]; oauthPostLogoutRedirectUri: string[] } };
+    const body = planFor(files, 'https://localhost:8081', '').find((call) => call.when === 'create')?.body as { fields: { oauthRedirectUri: string[]; oauthPostLogoutRedirectUri: string[] } };
     assert.deepEqual(body.fields.oauthRedirectUri, ['http://localhost:3001/callback']);
     assert.deepEqual(body.fields.oauthPostLogoutRedirectUri, ['http://localhost:3001/']);
   });

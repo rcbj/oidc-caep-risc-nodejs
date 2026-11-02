@@ -1,6 +1,16 @@
 import { OidcError } from './errors.ts';
 import { send, type TlsOptions } from './http.ts';
 
+/**
+ * `s` without its trailing slashes. A loop, not `replace(/\/+$/, '')`: that regex is retried at every
+ * slash of a run that is not at the end, so a long run followed by any other character is quadratic.
+ */
+export function trimTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 0x2f) end--;
+  return s.slice(0, end);
+}
+
 /** Asymmetric JWS algorithms this client verifies. HMAC algorithms are accepted only when named explicitly. */
 export const ASYMMETRIC_JWS_ALGS = Object.freeze([
   'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA', 'Ed25519',
@@ -49,7 +59,7 @@ export function issuerFromMetadataUrl(metadataUrl: string): string {
   const marker = '/.well-known/openid-configuration';
   const at = url.pathname.indexOf(marker);
   if (at < 0) throw new OidcError('config', `metadataUrl must be the openid-configuration URL, not ${metadataUrl}`);
-  const path = url.pathname.slice(0, at).replace(/\/+$/, '');
+  const path = trimTrailingSlashes(url.pathname.slice(0, at));
   return `${url.origin}${path}`;
 }
 
@@ -130,7 +140,7 @@ export async function discoverProvider(metadataUrl: string, tls: TlsOptions = {}
 /** RFC 8414 well-known URLs for a suffix such as `ssf-configuration`: path insertion, then the appended form. */
 export function wellKnownUrls(issuer: string, suffix: string): string[] {
   const url = new URL(issuer);
-  const path = url.pathname.replace(/\/+$/, '');
+  const path = trimTrailingSlashes(url.pathname);
   const inserted = `${url.origin}/.well-known/${suffix}${path}`;
   const appended = `${url.origin}${path}/.well-known/${suffix}`;
   return inserted === appended ? [inserted] : [inserted, appended];
