@@ -1,6 +1,6 @@
 {
   "name": "oidc-caep-risc-nodejs-demo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A traditional server-rendered web application that signs people in with OpenID Connect through oidc-caep-risc-nodejs.",
   "type": "module",
