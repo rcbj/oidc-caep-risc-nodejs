@@ -9,8 +9,9 @@
  *      chain is the fallback. The trust anchor's fingerprint is printed;
  *   3. the application, in the realm the metadata URL names: protocols oauth2 and oidc, response type
  *      code, grants authorization_code, refresh_token and client_credentials, the scopes from the
- *      configuration file, and token endpoint authentication client_secret_basic. No browser origin is
- *      registered: this client is a server, not a page;
+ *      configuration file, token endpoint authentication client_secret_basic, and
+ *      id_token_signed_response_alg RS256 (the library's default ID token allow-list). No browser
+ *      origin is registered: this client is a server, not a page;
  *   4. membership of SSF_READ and SSF_MANAGE for whichever of ssf.read and ssf.manage the scopes name.
  *      signals: false ignores those two scopes, so those roles are not registered and the test user
  *      is not put in those groups. No transmitter is registered. authn.multipleAccounts is set either way;
@@ -214,6 +215,8 @@ export function applicationFields(files: DemoFiles): Record<string, unknown> {
     oauthGrantType: [...GRANTS],
     oauthAllowedScope: files.scopes,
     oauthTokenEndpointAuthMethod: files.tokenEndpointAuthMethod,
+    // The library accepts RS256 ID tokens unless idTokenSigningAlgs widens the list.
+    oauthIdTokenSignedResponseAlg: 'RS256',
   };
 }
 

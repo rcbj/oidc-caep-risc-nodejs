@@ -54,6 +54,8 @@ describe('configure-iya-sts', () => {
     assert.deepEqual(body.fields.oauthGrantType, [...GRANTS]);
     assert.deepEqual(body.fields.oauthResponseType, ['code']);
     assert.equal(body.fields.oauthTokenEndpointAuthMethod, 'client_secret_basic');
+    assert.equal(body.fields.oauthIdTokenSignedResponseAlg, 'RS256');
+    assert.ok(plan.some((call) => call.when === 'exists' && JSON.stringify(call.body).includes('"attribute":"oauthIdTokenSignedResponseAlg","value":"RS256"')));
     assert.deepEqual(body.fields.oauthAllowedScope, files.scopes);
     assert.equal(body.fields.oauthRedirectUri && (body.fields.oauthRedirectUri as string[])[0], 'http://localhost:3000/callback');
     assert.equal('appCorsOrigin' in body.fields, false);

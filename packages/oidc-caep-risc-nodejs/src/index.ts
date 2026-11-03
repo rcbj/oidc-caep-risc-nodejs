@@ -13,9 +13,16 @@
  */
 
 export { RelyingParty } from './relying-party.ts';
-export type { AuthorizeOptions, AuthorizeRequest, ClientCredentials, OidcLogin, RefreshOptions, Transaction } from './relying-party.ts';
-export { readConfigFile, resolveConfig } from './config.ts';
-export type { OidcConfigFile, ResolvedConfig, TokenEndpointAuthMethod } from './config.ts';
+export type {
+  AccessToken, AuthorizeOptions, AuthorizeRequest, ClientCredentials, CompleteOptions, OidcLogin, RefreshOptions,
+  RelyingPartyOptions, ResourceRequest, Transaction,
+} from './relying-party.ts';
+export { DEFAULT_ID_TOKEN_SIGNING_ALGS, checkRedirectUri, finishConfig, readConfigFile, resolveConfig } from './config.ts';
+export type { OidcConfigFile, RelyingPartyConfig, ResolvedConfig, TokenEndpointAuthMethod } from './config.ts';
+export { DPOP_ALG, DpopSigner, athOf, htuOf } from './dpop.ts';
+export { MemoryTokenStore } from './token-store.ts';
+export type { CachedSession, TokenStore } from './token-store.ts';
+export type { HttpAnswer, TlsOptions } from './http.ts';
 export { ASYMMETRIC_JWS_ALGS, DEFAULT_SCOPES, discoverProvider, issuerFromMetadataUrl, validateProviderMetadata, wellKnownUrls } from './discovery.ts';
 export type { ProviderMetadata } from './discovery.ts';
 export { validateIdToken, hashClaim } from './id-token.ts';

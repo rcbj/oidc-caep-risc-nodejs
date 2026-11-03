@@ -1,6 +1,6 @@
 # oidc-caep-risc-nodejs
 
-A **confidential OpenID Connect client** for server-side Node.js applications, written in TypeScript and usable from JavaScript, and a traditional web demo built on it. It runs the Authorization Code flow with PKCE, authenticates at the token endpoint (`client_secret_basic`, `client_secret_post`, or `private_key_jwt`), and receives CAEP and RISC events on one Shared Signals poll stream. It depends on [`jose`](https://github.com/panva/jose) only. CAEP and RISC are on by default. `signals: false` turns them off, drops `ssf.read` and `ssf.manage`, and does not contact a transmitter.
+A **confidential OpenID Connect client** for server-side Node.js applications, written in TypeScript and usable from JavaScript, and a traditional web demo built on it. It runs the Authorization Code flow with PKCE, authenticates at the token endpoint (`client_secret_basic`, `client_secret_post`, or `private_key_jwt`), binds its tokens with DPoP when the provider offers it, keeps each sign-in's tokens in a per-session cache that refreshes them, and receives CAEP and RISC events on one Shared Signals poll stream. It depends on [`jose`](https://github.com/panva/jose) only. CAEP and RISC are on by default. `signals: false` turns them off, drops `ssf.read` and `ssf.manage`, and does not contact a transmitter.
 
 The configuration names the same discovery URL and the same scopes as [`oidc-caep-client`](https://github.com/rcbj/oidc-caep-client). That project is a browser application and a public client. This one is a server, and the client is confidential.
 

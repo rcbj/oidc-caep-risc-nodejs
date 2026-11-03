@@ -32,6 +32,10 @@ function main(argv: string[]): void {
   console.log(`metadata:   ${config.metadataUrl ?? config.metadata?.issuer ?? '(file)'}`);
   console.log(`secret:     ${config.clientSecret ? 'present' : 'absent'}`);
   console.log(`tls ca:     ${config.tlsCa ? 'present' : 'absent'}`);
+  console.log(`par:        ${config.par}`);
+  console.log(`dpop:       ${config.dpop}${config.dpopKeyPem ? ' (key from dpopKey)' : ''}`);
+  console.log(`id token:   ${config.idTokenSignedResponseAlg ?? config.idTokenSigningAlgs.join(' ')}${config.requireIdTokenTypAndAtHash ? ', typ and at_hash required' : ''}`);
+  console.log(`acr:        ${config.acrValues ?? '(not requested)'}`);
   console.log(`ssf:        ${config.ssf?.transmitter ?? 'not configured'}`);
 }
 
