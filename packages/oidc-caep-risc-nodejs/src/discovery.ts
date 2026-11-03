@@ -46,6 +46,10 @@ export interface ProviderMetadata {
   scopes_supported?: string[];
   grant_types_supported?: string[];
   authorization_response_iss_parameter_supported?: boolean;
+  /** RFC 9126: the provider accepts authorization requests only through its PAR endpoint. */
+  require_pushed_authorization_requests?: boolean;
+  /** RFC 9449: the DPoP proof algorithms the provider accepts. */
+  dpop_signing_alg_values_supported?: string[];
 }
 
 /** The issuer a discovery URL was built from: the URL with `/.well-known/openid-configuration` removed. */
@@ -98,7 +102,7 @@ export function validateProviderMetadata(raw: unknown, expectedIssuer?: string):
   for (const key of ['userinfo_endpoint', 'end_session_endpoint', 'pushed_authorization_request_endpoint', 'revocation_endpoint'] as const) {
     if (doc[key] !== undefined) metadata[key] = mustBeUrl(doc[key], key);
   }
-  for (const key of ['token_endpoint_auth_methods_supported', 'code_challenge_methods_supported', 'scopes_supported', 'grant_types_supported'] as const) {
+  for (const key of ['token_endpoint_auth_methods_supported', 'code_challenge_methods_supported', 'scopes_supported', 'grant_types_supported', 'dpop_signing_alg_values_supported'] as const) {
     if (doc[key] !== undefined) {
       if (!Array.isArray(doc[key])) throw new OidcError('discovery', `${key} must be an array`);
       metadata[key] = (doc[key] as unknown[]).map(String);
@@ -106,6 +110,9 @@ export function validateProviderMetadata(raw: unknown, expectedIssuer?: string):
   }
   if (doc.authorization_response_iss_parameter_supported !== undefined) {
     metadata.authorization_response_iss_parameter_supported = doc.authorization_response_iss_parameter_supported === true;
+  }
+  if (doc.require_pushed_authorization_requests !== undefined) {
+    metadata.require_pushed_authorization_requests = doc.require_pushed_authorization_requests === true;
   }
   if (!Array.isArray(metadata.response_types_supported) || !metadata.response_types_supported.map(String).includes('code')) {
     throw new OidcError('discovery', 'OpenID Provider does not support response_type=code');

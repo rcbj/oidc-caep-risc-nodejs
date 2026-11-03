@@ -35,13 +35,41 @@ export interface OidcConfigFile {
   post_logout_redirect_uri?: string;
   /** A space-separated string, as in oidc-caep-client's `oidc.json`, or an array. */
   scopes?: string | string[];
-  /** The only ID token `alg` to accept. Default: every asymmetric algorithm the provider advertises. */
+  /** The one ID token `alg` to accept. When set, it replaces `idTokenSigningAlgs`. It must be advertised. */
   idTokenSignedResponseAlg?: string;
-  /** Pushed Authorization Requests. Default `auto`: used when the provider advertises them. */
+  /**
+   * The ID token algorithms to accept. Default `["RS256"]`. Each must also be advertised by the
+   * provider; `none` is refused. An HMAC algorithm is accepted only when it is named here (or pinned).
+   */
+  idTokenSigningAlgs?: string[];
+  /**
+   * Default true: the ID token header must carry `typ` (`JWT` or `application/jwt`), and when the token
+   * response carries an access token, the ID token must carry a matching `at_hash`. false checks each
+   * only when it is present, for a provider that omits them.
+   */
+  requireIdTokenTypAndAtHash?: boolean;
+  /**
+   * Pushed Authorization Requests. Default `auto`: used when the provider advertises them, and always
+   * when it sets `require_pushed_authorization_requests` (then `never` fails at creation).
+   */
   par?: 'auto' | 'always' | 'never';
+  /**
+   * DPoP (RFC 9449). Default `auto`: used when the provider advertises ES256 in
+   * `dpop_signing_alg_values_supported`. `always` fails at creation when it does not. `never` sends no proofs.
+   */
+  dpop?: 'auto' | 'always' | 'never';
+  /**
+   * The DPoP private key: a P-256 PEM, a path, `file:` or `env:`. Default: a key generated when the
+   * relying party is created, held in memory only. Name one when several processes share sign-ins.
+   */
+  dpopKey?: string;
+  /** `acr_values` for every authorization request: a space-separated string or an array. The ID token's `acr` must be one of them. */
+  acrValues?: string | string[];
+  /** Seconds of clock skew allowed on `exp`, `iat` and `auth_time`. Default 30. */
   clockToleranceSec?: number;
+  /** The oldest ID token `iat` accepted, in seconds. Default 600. */
   maxIdTokenAgeSec?: number;
-  /** Allow an `http` issuer. Loopback `http` redirect URIs are allowed either way. Default false. */
+  /** Allow an `http` issuer and endpoints. Redirect URIs are https, or http on a loopback host, either way. Default false. */
   allowInsecure?: boolean;
   /**
    * CA trust chain for the provider's TLS listener certificate, in addition to node's own store.
@@ -71,7 +99,14 @@ export interface ResolvedConfig {
   postLogoutRedirectUri?: string;
   scopes: string;
   idTokenSignedResponseAlg?: string;
+  idTokenSigningAlgs: string[];
+  requireIdTokenTypAndAtHash: boolean;
   par: 'auto' | 'always' | 'never';
+  dpop: 'auto' | 'always' | 'never';
+  /** PEM P-256 private key for DPoP. Absent: one is generated when the relying party is created. */
+  dpopKeyPem?: string;
+  /** Space-separated `acr_values` sent on every authorization request. */
+  acrValues?: string;
   clockToleranceSec: number;
   maxIdTokenAgeSec: number;
   allowInsecure: boolean;
@@ -80,6 +115,20 @@ export interface ResolvedConfig {
   signals?: false;
   ssf?: { transmitter: string; pollIntervalMs?: number };
 }
+
+/** The members of {@link ResolvedConfig} that have a default. */
+type Defaulted = 'privateKeyAlg' | 'idTokenSigningAlgs' | 'requireIdTokenTypAndAtHash' | 'par' | 'dpop'
+  | 'clockToleranceSec' | 'maxIdTokenAgeSec' | 'allowInsecure';
+
+/**
+ * What {@link RelyingParty.create} accepts: a {@link ResolvedConfig} whose defaulted members may be
+ * left out. They are filled, and every member is checked, exactly as when the configuration is read
+ * from a file.
+ */
+export type RelyingPartyConfig = Omit<ResolvedConfig, Defaulted> & Partial<Pick<ResolvedConfig, Defaulted>>;
+
+/** The ID token algorithms accepted when the configuration names none. */
+export const DEFAULT_ID_TOKEN_SIGNING_ALGS: readonly string[] = Object.freeze(['RS256']);
 
 function asObject(raw: unknown): OidcConfigFile {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new OidcError('config', 'the configuration must be a JSON object');
@@ -143,7 +192,11 @@ function isLoopback(url: URL): boolean {
   return url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
 }
 
-function checkRedirect(value: string, name: string, allowInsecure: boolean): string {
+/**
+ * The redirect-URI rule: https, or http on a loopback host (`localhost`, `127.0.0.1`, `[::1]`).
+ * It holds for the configured URIs and for a per-request override; `allowInsecure` does not relax it.
+ */
+export function checkRedirectUri(value: string, name = 'redirectUri'): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -151,8 +204,67 @@ function checkRedirect(value: string, name: string, allowInsecure: boolean): str
     throw new OidcError('config', `${name} is not a URL: ${value}`);
   }
   if (url.protocol === 'https:') return value;
-  if (url.protocol === 'http:' && (isLoopback(url) || allowInsecure)) return value;
-  throw new OidcError('config', `${name} must use https, or http on loopback: ${value}`);
+  if (url.protocol === 'http:' && isLoopback(url)) return value;
+  throw new OidcError('config', `${name} must use https, or http on a loopback host: ${value}`);
+}
+
+function mode(value: unknown, name: string): 'auto' | 'always' | 'never' {
+  const chosen = value ?? 'auto';
+  if (chosen !== 'auto' && chosen !== 'always' && chosen !== 'never') throw new OidcError('config', `${name} must be auto, always, or never`);
+  return chosen;
+}
+
+function seconds(value: unknown, name: string, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new OidcError('config', `${name} must be a number of seconds, 0 or more`);
+  return value;
+}
+
+function algorithms(value: unknown): string[] {
+  if (value === undefined) return [...DEFAULT_ID_TOKEN_SIGNING_ALGS];
+  if (!Array.isArray(value) || !value.length || value.some((alg) => typeof alg !== 'string' || !alg.trim())) {
+    throw new OidcError('config', 'idTokenSigningAlgs must be a non-empty list of algorithm names');
+  }
+  const list = [...new Set(value.map((alg: string) => alg.trim()))];
+  if (list.some((alg) => alg.toLowerCase() === 'none')) throw new OidcError('config', 'idTokenSigningAlgs must not name none');
+  return list;
+}
+
+function acrList(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const list = Array.isArray(value) ? value.map((v) => String(v).trim()) : String(value).trim().split(/\s+/);
+  const joined = list.filter(Boolean).join(' ');
+  return joined || undefined;
+}
+
+/**
+ * Fills the defaults and checks a configuration, however it was made: read from a file by
+ * {@link resolveConfig}, or built by hand and passed to {@link RelyingParty.create}.
+ */
+export function finishConfig(config: RelyingPartyConfig): ResolvedConfig {
+  if (!config || typeof config !== 'object') throw new OidcError('config', 'the configuration must be an object');
+  if (!config.redirectUri) throw new OidcError('config', 'redirectUri is required');
+  if (config.idTokenSignedResponseAlg !== undefined && (!config.idTokenSignedResponseAlg || config.idTokenSignedResponseAlg.toLowerCase() === 'none')) {
+    throw new OidcError('config', 'idTokenSignedResponseAlg must name a signing algorithm, not none');
+  }
+  const require = config.requireIdTokenTypAndAtHash ?? true;
+  if (typeof require !== 'boolean') throw new OidcError('config', 'requireIdTokenTypAndAtHash must be true or false');
+  const acrValues = acrList(config.acrValues);
+  const { acrValues: _acr, ...rest } = config;
+  return {
+    ...rest,
+    privateKeyAlg: config.privateKeyAlg ?? 'RS256',
+    redirectUri: checkRedirectUri(config.redirectUri, 'redirectUri'),
+    ...(config.postLogoutRedirectUri ? { postLogoutRedirectUri: checkRedirectUri(config.postLogoutRedirectUri, 'postLogoutRedirectUri') } : {}),
+    idTokenSigningAlgs: algorithms(config.idTokenSigningAlgs),
+    requireIdTokenTypAndAtHash: require,
+    par: mode(config.par, 'par'),
+    dpop: mode(config.dpop, 'dpop'),
+    ...(acrValues ? { acrValues } : {}),
+    clockToleranceSec: seconds(config.clockToleranceSec, 'clockToleranceSec', 30),
+    maxIdTokenAgeSec: seconds(config.maxIdTokenAgeSec, 'maxIdTokenAgeSec', 600),
+    allowInsecure: config.allowInsecure === true,
+  };
 }
 
 /**
@@ -179,8 +291,6 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
   // Drop the Shared Signals scopes after the default is applied. DEFAULT_SCOPES itself stays as it is.
   if (!signals) scopes = scopes.split(/\s+/).filter((scope) => scope !== 'ssf.read' && scope !== 'ssf.manage').join(' ');
   if (!scopes.split(/\s+/).includes('openid')) throw new OidcError('config', 'scopes must include openid');
-  const par = doc.par ?? 'auto';
-  if (par !== 'auto' && par !== 'always' && par !== 'never') throw new OidcError('config', 'par must be auto, always, or never');
 
   let issuer = doc.issuer?.trim() || undefined;
   const metadataUrl = doc.metadataUrl?.trim() || undefined;
@@ -214,6 +324,8 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
   }
 
   const tlsCa = readTrust(doc.tlsCa, baseDir);
+  let dpopKeyPem: string | undefined;
+  if (doc.dpopKey) dpopKeyPem = keyValue(doc.dpopKey, baseDir, 'the DPoP key');
 
   const postLogout = String(doc.postLogoutRedirectUri ?? doc.post_logout_redirect_uri ?? '').trim();
   let ssf: ResolvedConfig['ssf'];
@@ -223,27 +335,33 @@ export function resolveConfig(raw: unknown, baseDir: string): ResolvedConfig {
     ssf = { transmitter, ...(doc.ssf.pollIntervalMs ? { pollIntervalMs: doc.ssf.pollIntervalMs } : {}) };
   }
 
-  return {
+  const acrValues = acrList(doc.acrValues);
+  return finishConfig({
     ...(issuer ? { issuer } : {}),
     ...(metadataUrl ? { metadataUrl } : {}),
     ...(metadata ? { metadata } : {}),
     clientId,
     ...(clientSecret ? { clientSecret } : {}),
     ...(privateKeyPem ? { privateKeyPem } : {}),
-    privateKeyAlg: doc.privateKeyAlg ?? 'RS256',
+    ...(doc.privateKeyAlg ? { privateKeyAlg: doc.privateKeyAlg } : {}),
     tokenEndpointAuthMethod,
-    redirectUri: checkRedirect(redirectUri, 'redirectUri', allowInsecure),
-    ...(postLogout ? { postLogoutRedirectUri: checkRedirect(postLogout, 'postLogoutRedirectUri', allowInsecure) } : {}),
+    redirectUri,
+    ...(postLogout ? { postLogoutRedirectUri: postLogout } : {}),
     scopes,
-    ...(doc.idTokenSignedResponseAlg ? { idTokenSignedResponseAlg: doc.idTokenSignedResponseAlg } : {}),
-    par,
-    clockToleranceSec: doc.clockToleranceSec ?? 30,
-    maxIdTokenAgeSec: doc.maxIdTokenAgeSec ?? 600,
+    ...(doc.idTokenSignedResponseAlg !== undefined ? { idTokenSignedResponseAlg: doc.idTokenSignedResponseAlg } : {}),
+    ...(doc.idTokenSigningAlgs !== undefined ? { idTokenSigningAlgs: doc.idTokenSigningAlgs } : {}),
+    ...(doc.requireIdTokenTypAndAtHash !== undefined ? { requireIdTokenTypAndAtHash: doc.requireIdTokenTypAndAtHash } : {}),
+    ...(doc.par !== undefined ? { par: doc.par } : {}),
+    ...(doc.dpop !== undefined ? { dpop: doc.dpop } : {}),
+    ...(dpopKeyPem ? { dpopKeyPem } : {}),
+    ...(acrValues ? { acrValues } : {}),
+    ...(doc.clockToleranceSec !== undefined ? { clockToleranceSec: doc.clockToleranceSec } : {}),
+    ...(doc.maxIdTokenAgeSec !== undefined ? { maxIdTokenAgeSec: doc.maxIdTokenAgeSec } : {}),
     allowInsecure,
     ...(tlsCa ? { tlsCa } : {}),
     ...(signals ? {} : { signals: false as const }),
     ...(ssf ? { ssf } : {}),
-  };
+  });
 }
 
 /** Reads a configuration file and resolves it. Relative paths start in the file's directory. */
