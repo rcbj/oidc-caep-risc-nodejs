@@ -1,6 +1,6 @@
 {
   "name": "oidc-caep-risc-nodejs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Server-side OpenID Connect confidential client for Node.js: Authorization Code with PKCE, client authentication, and a CAEP and RISC Shared Signals receiver. TypeScript, usable from JavaScript.",
   "homepage": "https://rcbj.github.io/oidc-caep-risc-nodejs/",
   "repository": {
