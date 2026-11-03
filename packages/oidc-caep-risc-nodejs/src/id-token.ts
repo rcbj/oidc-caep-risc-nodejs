@@ -25,6 +25,13 @@ export interface IdTokenChecks {
   /** When a refresh returns an ID token, its `sub` must be this one (OIDC Core section 12.2). */
   previousSub?: string;
   clientSecret?: string;
+  /**
+   * Default false here; the relying party passes its `requireIdTokenTypAndAtHash` (default true).
+   * When true, the header must carry `typ`, and `at_hash` must be present whenever `accessToken` is given.
+   */
+  requireTypAndAtHash?: boolean;
+  /** When `acrValues` was requested: `acr` must be present and be one of these. */
+  acrValues?: string[];
 }
 
 function same(a: string, b: string): boolean {
@@ -43,8 +50,11 @@ export function hashClaim(value: string, alg: string): string {
   return digest.subarray(0, digest.length / 2).toString('base64url');
 }
 
-function checkHash(claim: unknown, value: string, alg: string, name: string): void {
-  if (claim === undefined) return;
+function checkHash(claim: unknown, value: string, alg: string, name: string, required = false): void {
+  if (claim === undefined) {
+    if (required) throw new OidcError('validation', `the ID token has no ${name}, and this client requires it`);
+    return;
+  }
   if (typeof claim !== 'string' || !same(claim, hashClaim(value, alg))) {
     throw new OidcError('validation', `the ID token's ${name} does not match`);
   }
@@ -65,6 +75,7 @@ export async function validateIdToken(token: string, checks: IdTokenChecks): Pro
   if (!checks.algorithms.includes(alg)) throw new OidcError('signature', `the ID token is signed with ${alg || '(no alg)'}, which this client does not accept`);
   if (header.crit !== undefined) throw new OidcError('validation', 'the ID token has a crit header this client does not understand');
   const typ = header.typ === undefined ? '' : String(header.typ).toLowerCase();
+  if (!typ && checks.requireTypAndAtHash) throw new OidcError('validation', 'the ID token header has no typ, and this client requires JWT');
   if (typ && (typ !== 'jwt' && typ !== 'application/jwt' || NOT_ID_TOKEN.has(typ))) {
     throw new OidcError('validation', `the ID token typ is ${String(header.typ)}, not an ID token`);
   }
@@ -87,6 +98,10 @@ export async function validateIdToken(token: string, checks: IdTokenChecks): Pro
     throw new OidcError(signature ? 'signature' : 'validation', `the ID token was refused: ${message}`, { cause: err });
   }
   if (typeof payload.sub !== 'string' || !payload.sub) throw new OidcError('validation', 'the ID token has no sub');
+  if (typeof payload.iat !== 'number') throw new OidcError('validation', 'the ID token has no iat');
+  if (payload.iat > Math.floor(Date.now() / 1000) + checks.clockToleranceSec) {
+    throw new OidcError('validation', 'the ID token iat is in the future, beyond the clock tolerance');
+  }
   const aud = payload.aud;
   const audiences = Array.isArray(aud) ? aud.map(String) : [String(aud ?? '')];
   if (audiences.length > 1 && payload.azp !== checks.clientId) {
@@ -103,8 +118,12 @@ export async function validateIdToken(token: string, checks: IdTokenChecks): Pro
   if (checks.previousSub !== undefined && payload.sub !== checks.previousSub) {
     throw new OidcError('validation', 'the refreshed ID token is for a different subject');
   }
-  if (checks.accessToken) checkHash(payload.at_hash, checks.accessToken, alg, 'at_hash');
+  if (checks.accessToken) checkHash(payload.at_hash, checks.accessToken, alg, 'at_hash', checks.requireTypAndAtHash === true);
   if (checks.code) checkHash(payload.c_hash, checks.code, alg, 'c_hash');
+  if (checks.acrValues && checks.acrValues.length) {
+    if (typeof payload.acr !== 'string' || !payload.acr) throw new OidcError('validation', 'acr_values was requested and the ID token has no acr');
+    if (!checks.acrValues.includes(payload.acr)) throw new OidcError('validation', `the ID token acr ${payload.acr} is not one of the requested acr_values`);
+  }
   if (checks.maxAge !== undefined) {
     if (typeof payload.auth_time !== 'number') throw new OidcError('validation', 'max_age was requested and the ID token has no auth_time');
     if (payload.auth_time < Math.floor(Date.now() / 1000) - checks.maxAge - checks.clockToleranceSec) {
@@ -129,13 +148,29 @@ export async function fetchJwks(jwksUri: string, tls: TlsOptions): Promise<JWTVe
   return createLocalJWKSet(body as { keys: [] });
 }
 
-/** The algorithms an ID token from this provider may use: the configured one, or the asymmetric overlap. */
-export function idTokenAlgorithms(advertised: readonly string[], pinned?: string): string[] {
+const SYMMETRIC = /^HS(256|384|512)$/;
+
+/**
+ * The algorithms an ID token from this provider may use. `pinned` (idTokenSignedResponseAlg) is the one
+ * algorithm when set; otherwise the allow-list (idTokenSigningAlgs, default `["RS256"]`). Every allowed
+ * algorithm must be one this client verifies, and must be advertised by the provider; `none` never is.
+ * An HMAC algorithm is accepted only because it was named.
+ */
+export function idTokenAlgorithms(advertised: readonly string[], pinned?: string, allowList: readonly string[] = ['RS256']): string[] {
+  const wanted = pinned ? [pinned] : [...allowList];
+  for (const alg of wanted) {
+    if (alg.toLowerCase() === 'none') throw new OidcError('config', 'an ID token algorithm of none is never accepted');
+    if (!SYMMETRIC.test(alg) && !(ASYMMETRIC_JWS_ALGS as readonly string[]).includes(alg)) {
+      throw new OidcError('config', `this client cannot verify ID token alg ${alg}`);
+    }
+  }
   if (pinned) {
     if (!advertised.includes(pinned)) throw new OidcError('discovery', `the provider does not advertise id_token alg ${pinned}`);
     return [pinned];
   }
-  const allowed = advertised.filter((alg) => (ASYMMETRIC_JWS_ALGS as readonly string[]).includes(alg));
-  if (!allowed.length) throw new OidcError('discovery', `none of the provider's ID token algorithms can be verified (${advertised.join(', ')})`);
+  const allowed = wanted.filter((alg) => advertised.includes(alg));
+  if (!allowed.length) {
+    throw new OidcError('discovery', `the provider advertises none of the allowed ID token algorithms (${wanted.join(', ')}); it advertises ${advertised.join(', ')}`);
+  }
   return allowed;
 }

@@ -2,6 +2,8 @@
 
 A confidential OpenID Connect relying party for a traditional Node.js application, and a CAEP and RISC receiver on one Shared Signals poll stream. It is TypeScript, usable from JavaScript, and depends on `jose` only. Authorization Code with PKCE (S256) is required. Client authentication is `client_secret_basic`, `client_secret_post`, or `private_key_jwt`. A public client (`none`) is refused.
 
+The client profile (issue #31, the same settings and defaults in the six sibling libraries in Python, Java, Rust, Go, C# and C): `par` `auto` (always pushes when the provider sets `require_pushed_authorization_requests`, and `never` then fails at creation); `dpop` `auto`/`always`/`never` (ES256 key made at creation, or `dpopKey`; proofs on PAR, token, UserInfo and every SSF transmitter call; `dpop_jkt`; one `use_dpop_nonce` retry; `token_type` must be `DPoP` with a proof and `Bearer` without); `acrValues` (the ID token `acr` must be one of the requested values; not rechecked on refresh); `idTokenSigningAlgs` default `["RS256"]` (overlap with the advertised list, `none` never, HMAC only when named; `idTokenSignedResponseAlg` pins one); `requireIdTokenTypAndAtHash` default true; `clockToleranceSec` 30 and `maxIdTokenAgeSec` 600. `finishConfig()` (src/config.ts) applies the defaults and the redirect-URI rule (https, or http on `localhost`, `127.0.0.1`, `[::1]`; `allowInsecure` does not relax it) to both `resolveConfig` and `RelyingParty.create`. `complete(..., { session })` caches tokens in a `TokenStore` (default `MemoryTokenStore`); `accessToken(session)` refreshes with 30 s or less left and removes the session on a failed refresh. Keep these names and defaults in step with the siblings.
+
 The browser library is [oidc-caep-client](https://github.com/rcbj/oidc-caep-client). It is a public client. This one is not. The discovery URL and the default scopes match.
 
 `signals` defaults to on. `signals: false` turns CAEP and RISC off: the receiver does not start, transmitter metadata is not required, and the authorization request does not include `ssf.read` or `ssf.manage`. `DEFAULT_SCOPES` still names those two scopes. They are removed after that default is applied.
@@ -14,9 +16,9 @@ Node.js 22.18 or later. The package engines field says `>=22.18.0`. Continuous i
 
 | Path | What it is |
 |---|---|
-| `packages/oidc-caep-risc-nodejs` | The library published to npm as `oidc-caep-risc-nodejs`. Source is `src/` (`relying-party.ts`, `client-auth.ts`, `id-token.ts`, `pkce.ts`, `discovery.ts`, `ssf/`). Tests are `test/`. `npm run build` writes `dist/`. |
+| `packages/oidc-caep-risc-nodejs` | The library published to npm as `oidc-caep-risc-nodejs`. Source is `src/` (`relying-party.ts`, `config.ts`, `client-auth.ts`, `id-token.ts`, `dpop.ts`, `token-store.ts`, `pkce.ts`, `discovery.ts`, `ssf/`). Tests are `test/`: `rp.test.ts`, `profile.test.ts` (issue #31, point by point), `ssf.test.ts`, against `test/stub-provider.ts` (a stub provider with PAR, DPoP and nonces) and stub transmitters. `npm run build` writes `dist/`. |
 | `demo` | The server-rendered demo. `demo/server.ts` and `demo/public/`. Config is `demo/oidc.json`. An error is logged with its stack and the page shows a fixed sentence; a refused sign-in shows the label of its `OidcError` code. Never render an error's message. |
-| `scripts` | `configure-iya-sts.ts`, the install script, registers the confidential client on iya-sts and writes the listener CA trust chain to the file `tlsCa` names. `trust-chain.mjs` holds `saveTrustChain()` and refreshes that file. `trust-chain.test.ts`: the chain is written whole to `tlsCa`'s path, and the library trusts a provider through it. `demo-errors.test.ts` starts `demo/server.ts` and holds that no page and no `/live-status` answer carries an exception's text or a provider `error_description`. `live_iya_sts.py` is the host Python live sign-in. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
+| `scripts` | `configure-iya-sts.ts`, the install script, registers the confidential client on iya-sts (with `oauthIdTokenSignedResponseAlg` `RS256`) and writes the listener CA trust chain to the file `tlsCa` names. `trust-chain.mjs` holds `saveTrustChain()` and refreshes that file. `trust-chain.test.ts`: the chain is written whole to `tlsCa`'s path, and the library trusts a provider through it. `demo-errors.test.ts` starts `demo/server.ts` and holds that no page and no `/live-status` answer carries an exception's text or a provider `error_description`. `live_iya_sts.py` is the host Python live sign-in. `redirects.mjs` rewrites a loopback URL onto `PORT`. `version.mjs` stamps the published version. |
 | `docs` | The GitHub Pages site. |
 | `tools/apidocs` | TypeDoc. It is outside the npm workspace. |
 | `Dockerfile`, `docker-compose.yml` | The demo image. Compose uses host networking. |
@@ -38,7 +40,7 @@ const request = await rp.authorize();
 const who = await rp.complete(query, request);
 ```
 
-Keep the transaction (`state`, nonce, code verifier) until the browser returns. Tokens stay in this process. The package README and `packages/oidc-caep-risc-nodejs/docs/guide.md` are the reference.
+Keep the transaction (`state`, nonce, code verifier, requested `acrValues`) until the browser returns. Tokens stay in this process, in the session cache: pass the application's session id to `complete(query, request, { session })` and call `rp.accessToken(session)` for a valid access token. The demo does that, sends its SSF calls through `rp.signalsRequest('ssf.manage')`, and gives the receiver `relyingParty: rp`. The package README and `packages/oidc-caep-risc-nodejs/docs/guide.md` are the reference.
 
 ## Tests
 

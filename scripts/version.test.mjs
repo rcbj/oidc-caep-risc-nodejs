@@ -36,10 +36,10 @@ describe('version numbering', () => {
   });
 
   it('the command line reads VERSION and the published list', () => {
-    assert.equal(run([], ['0.1.0', '0.1.1']), '0.1.2');
-    assert.equal(run(['--channel', 'next'], ['0.1.0']), '0.1.1-next.0');
-    const record = JSON.parse(run(['--json', '--channel', 'next'], ['0.1.1-next.0']));
-    assert.equal(record.version, '0.1.0-next.0');
+    assert.equal(run([], ['0.2.0', '0.2.1']), '0.2.2');
+    assert.equal(run(['--channel', 'next'], ['0.2.0']), '0.2.1-next.0');
+    const record = JSON.parse(run(['--json', '--channel', 'next'], ['0.2.1-next.0']));
+    assert.equal(record.version, '0.2.0-next.0');
     assert.equal(record.channel, 'next');
   });
 });

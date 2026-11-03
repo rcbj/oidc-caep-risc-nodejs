@@ -24,7 +24,7 @@ Pass `endOn` to choose a different set. The URIs are on `EVENT` in [the referenc
 
 ## Authentication
 
-iya-sts accepts a Bearer token on `/ssf` when the token's scope includes `ssf.manage` and the application holds the `SSF_MANAGE` role. `ssf.manage` covers read. The token is the application's, from the client-credentials grant, not a person's access token:
+iya-sts accepts an access token on `/ssf` when the token's scope includes `ssf.manage` and the application holds the `SSF_MANAGE` role. `ssf.manage` covers read. The token is the application's, from the client-credentials grant, not a person's access token. `rp.signalsRequest(scope)` sends every call with it: as a DPoP-bound token with a proof (`ath`, `htm`, `htu`, and a retry when the transmitter asks for a nonce) when DPoP is in use, as a Bearer token otherwise:
 
 ```ts
 import { RelyingParty, SignalsReceiver, trackedFromLogin } from 'oidc-caep-risc-nodejs';
@@ -33,10 +33,8 @@ const rp = await RelyingParty.fromFile('oidc.json');
 const receiver = new SignalsReceiver({
   transmitter: 'https://idp.example',
   tls: rp.tls(),
-  headers: async () => {
-    const creds = await rp.clientCredentials('ssf.manage');
-    return { authorization: `Bearer ${creds.accessToken}` };
-  },
+  request: rp.signalsRequest('ssf.manage'),
+  relyingParty: rp,   // an ended session's cached tokens are removed too
   description: 'app',
   onEndSessions: async (ids, event) => {
     for (const id of ids) await sessions.end(id);
@@ -46,9 +44,9 @@ receiver.on('*', (event) => log(event));
 await receiver.start();
 ```
 
-The grant has to be registered on the client, next to `authorization_code` and `refresh_token`. The setup script does that. A `DPoP` token is refused: this client sends Bearer tokens.
+The grant has to be registered on the client, next to `authorization_code` and `refresh_token`. The setup script does that. The client-credentials token is cached until shortly before it expires; a 401 that is not a nonce challenge drops it, so the next call takes a new one.
 
-Mutual TLS is the other way in. Pass `cert` and `key` on `tls` and omit `headers`. The demo uses the Bearer token, because the confidential client already has a secret and iya-sts will mint the application token.
+`headers`, called with each call's method and URL, is still there for an application that sends its own authorization. Mutual TLS is the other way in. Pass `cert` and `key` on `tls` and omit `request` and `headers`. The demo uses `signalsRequest`, because the confidential client already has a secret and iya-sts will mint the application token.
 
 ## After each sign-in
 
@@ -56,7 +54,7 @@ Mutual TLS is the other way in. Pass `cert` and `key` on `tls` and omit `headers
 await receiver.track(trackedFromLogin(localId, login, expiresAt));
 ```
 
-That records the subject's `sub` as the person, the email, and the ID token `sid` as the provider session. `session-revoked` matches the provider session. The account events match the person, then the email. `untrack` after a local sign-out.
+That records the subject's `sub` as the person, the email, and the ID token `sid` as the provider session. `session-revoked` matches the provider session. The account events match the person, then the email. `untrack` after a local sign-out; with `relyingParty` set it also removes that session's cached tokens.
 
 ## Handlers
 

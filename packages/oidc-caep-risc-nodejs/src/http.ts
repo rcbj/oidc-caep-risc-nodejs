@@ -22,6 +22,15 @@ export interface HttpAnswer {
   status: number;
   contentType: string;
   body: string;
+  /** The response headers, names in lower case. */
+  headers: http.IncomingHttpHeaders;
+}
+
+/** One response header as a string: the first value when it was sent more than once. */
+export function header(answer: HttpAnswer, name: string): string | undefined {
+  const value = answer.headers[name.toLowerCase()];
+  if (Array.isArray(value)) return value[0];
+  return value === undefined ? undefined : String(value);
 }
 
 export function send(url: string, init: { method?: string; headers?: Record<string, string>; body?: string },
@@ -60,6 +69,7 @@ export function send(url: string, init: { method?: string; headers?: Record<stri
         status: res.statusCode ?? 0,
         contentType: String(res.headers['content-type'] ?? ''),
         body: Buffer.concat(chunks).toString('utf8'),
+        headers: res.headers,
       }));
       res.on('error', reject);
     });

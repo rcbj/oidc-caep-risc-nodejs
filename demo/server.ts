@@ -27,15 +27,18 @@
 // the label of the library's OidcError code (signInRefusal below); otherwise a generic one.
 //
 // SHARED SIGNALS: with an `ssf` block, and unless `signals` is false, the demo is a CAEP and RISC
-// receiver (the library's SignalsReceiver). One poll stream, authenticated by a Bearer token from the
-// client-credentials grant (scope ssf.manage). `signals: false` does not start the receiver and does
+// receiver (the library's SignalsReceiver). One poll stream, authenticated by a token from the
+// client-credentials grant (scope ssf.manage), sent through RelyingParty.signalsRequest(): DPoP-bound,
+// with a proof on every call, when the provider offers DPoP. `signals: false` does not start the receiver and does
 // not contact a transmitter. An event that revokes a session, or disables, purges or compromises an
 // account, ends the matching local sessions, and their open tabs are told at once.
 //
 // Two cookies. `oidc_txn` holds the outstanding transactions (state, nonce, code verifier), HMAC-signed,
 // scoped to /callback, SameSite=Lax: the provider brings the browser back with a top-level GET, which
 // sends a Lax cookie. `aset` is the account set, SameSite=Lax, set after the callback.
-// Access tokens and refresh tokens stay in this process. The pages never render them.
+// Access tokens and refresh tokens stay in this process, in the relying party's per-session cache
+// (keyed by the demo's session id); RelyingParty.accessToken(sid) returns a valid one, refreshing it
+// when it is about to expire. The pages never render them.
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -125,6 +128,10 @@ const accountSets = new Map<string, string[]>();
 function endSession(sid: string): void {
   const s = sessions.get(sid);
   sessions.delete(sid);
+  // The relying party's cached tokens for this session go with it.
+  void rpPromise?.then((rp) => rp.removeSession(sid)).catch((err: unknown) => {
+    console.warn(`removing the cached tokens of a session failed: ${logged(err)}`);
+  });
   if (!s) return;
   const set = accountSets.get(s.setId);
   if (set) {
@@ -162,13 +169,15 @@ function accessUsername(token: string): string | undefined {
   }
 }
 
-async function withUsername(rp: RelyingParty, login: OidcLogin): Promise<OidcLogin> {
+async function withUsername(rp: RelyingParty, login: OidcLogin, sid: string): Promise<OidcLogin> {
   let preferred = login.preferredUsername;
   let email = login.email;
   let name = login.name;
   let claims = login.claims;
   try {
-    const info = await rp.userinfo(login.accessToken, login.subject);
+    // The access token comes from the relying party's session cache, as any later call's would.
+    const token = await rp.accessToken(sid);
+    const info = await rp.userinfo(token.accessToken, login.subject, { tokenType: token.tokenType });
     if (typeof info.preferred_username === 'string' && info.preferred_username) preferred = info.preferred_username;
     if (!email && typeof info.email === 'string' && info.email) email = info.email;
     if (!name && typeof info.name === 'string' && info.name) name = info.name;
@@ -211,10 +220,10 @@ function startReceiver(rp: RelyingParty): void {
   const r = new SignalsReceiver({
     transmitter: SSF.transmitter!,
     tls: rp.tls(),
-    headers: async () => {
-      const creds = await rp.clientCredentials('ssf.manage');
-      return { authorization: `Bearer ${creds.accessToken}` };
-    },
+    // A client-credentials token on every call, DPoP-bound with a proof when DPoP is in use.
+    request: rp.signalsRequest('ssf.manage'),
+    // An event that ends a session also drops that session's cached tokens.
+    relyingParty: rp,
     description: `oidc-caep-risc-nodejs demo (${rp.config.clientId})`,
     ...(SSF.pollIntervalMs ? { pollIntervalMs: SSF.pollIntervalMs } : {}),
     onEndSessions: (ids: string[], event: SignalEvent) => {
@@ -606,12 +615,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const txn = pending?.txns.find((t) => sameState(t.state, state));
     try {
       if (!txn) throw new OidcError('validation', 'this callback is not a sign-in this browser started');
-      const login = await withUsername(rp, await rp.complete(url.searchParams, txn));
       if (sessions.size >= MAX_SESSIONS) {
-        for (const [k, s] of sessions) if (s.expires <= Date.now()) sessions.delete(k);
+        for (const [k, s] of sessions) if (s.expires <= Date.now()) endSession(k);
       }
       if (sessions.size >= MAX_SESSIONS) throw new Error('too many sessions');
+      // The session id is chosen first: the relying party caches the sign-in's tokens under it.
       const sid = randomBytes(32).toString('base64url');
+      const login = await withUsername(rp, await rp.complete(url.searchParams, txn, { session: sid }), sid);
       const until = Date.now() + SESSION_MS;
       const oldSetId = pending?.set ?? cookies(req).aset;
       const accounts = accountsOfSet(oldSetId);

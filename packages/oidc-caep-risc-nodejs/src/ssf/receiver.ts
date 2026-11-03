@@ -8,13 +8,14 @@
 //   onEndSessions the application's callback: these local sessions must end now;
 //   on(type)      the application's handler for an event type.
 //
-// Authentication is the application's choice of headers (a Bearer token from the client-credentials
-// grant, scope ssf.manage) or a TLS client certificate. Every SET is verified — signature against the
+// Authentication is the application's choice: `request`, from RelyingParty.signalsRequest(), which
+// sends a client-credentials token (scope ssf.manage) with a DPoP proof when the token is DPoP-bound;
+// headers of its own; or a TLS client certificate. Every SET is verified — signature against the
 // transmitter's JWKS, iss, aud, typ — before anything acts on it, and acknowledged only once handled.
 
 import { trimTrailingSlashes, wellKnownUrls } from '../discovery.ts';
 import { OidcError } from '../errors.ts';
-import { send, type TlsOptions } from '../http.ts';
+import { send, type HttpAnswer, type TlsOptions } from '../http.ts';
 import { DEFAULT_ENDING_EVENTS, DEFAULT_EVENTS_REQUESTED, EVENT, subjectOf, type SubjectRef } from './events.ts';
 import { verifyCompactJws, type Jwk } from './jws.ts';
 import { MemorySessionIndex, type SessionIndex, type TrackedSession } from './session-index.ts';
@@ -44,8 +45,21 @@ export interface SignalsReceiverOptions {
   transmitter: string;
   /** TLS for every call: `ca` to trust, and `cert` + `key` to present (mutual TLS). */
   tls?: TlsOptions;
-  /** Extra headers for every call, for example `authorization: Bearer …` from {@link RelyingParty.clientCredentials}. */
-  headers?: () => Record<string, string> | Promise<Record<string, string>>;
+  /**
+   * Extra headers for every call, for example `authorization: Bearer …` from
+   * {@link RelyingParty.clientCredentials}. Called with the method and URL of the call.
+   */
+  headers?: (call: { method: string; url: string }) => Record<string, string> | Promise<Record<string, string>>;
+  /**
+   * Sends every call instead of a plain HTTPS request. {@link RelyingParty.signalsRequest} returns one
+   * that adds the application's access token, and a DPoP proof (with a nonce retry) when it is DPoP-bound.
+   */
+  request?: (method: string, url: string, init: { headers: Record<string, string>; body?: string }) => Promise<HttpAnswer>;
+  /**
+   * The relying party whose session cache holds the tokens of the local sessions. When an event ends
+   * sessions, and on {@link SignalsReceiver.untrack}, their cached tokens are removed too.
+   */
+  relyingParty?: { removeSession(session: string): unknown };
   /** The event types to ask for. Default: the CAEP session and credential events and the RISC account events. */
   eventsRequested?: readonly string[];
   /** The event types that end the matching local sessions. */
@@ -126,9 +140,10 @@ export class SignalsReceiver {
     await this.#index.add(session);
   }
 
-  /** Forgets a local session, after a sign-out. */
+  /** Forgets a local session, after a sign-out, and its cached tokens when `relyingParty` is set. */
   async untrack(localId: string): Promise<void> {
     await this.#index.remove(localId);
+    await this.#options.relyingParty?.removeSession(localId);
   }
 
   /** Adds a handler for one event type (`EVENT.*`), or `*` for every event. */
@@ -140,9 +155,12 @@ export class SignalsReceiver {
   }
 
   async #call(method: string, url: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    const headers: Record<string, string> = { accept: 'application/json', ...(await this.#options.headers?.()) };
+    const headers: Record<string, string> = { accept: 'application/json', ...(await this.#options.headers?.({ method, url })) };
     if (body !== undefined) headers['content-type'] = 'application/json';
-    const answer = await send(url, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }, this.#options.tls ?? {}, 'ssf');
+    const init = { headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) };
+    const answer = this.#options.request
+      ? await this.#options.request(method, url, init)
+      : await send(url, { method, ...init }, this.#options.tls ?? {}, 'ssf');
     let json: unknown;
     if (answer.body) {
       try {
@@ -318,7 +336,16 @@ export class SignalsReceiver {
           this.#options.log.error(`ssf: onEndSessions threw for ${type} (SET ${jti} is still acknowledged): ${(err as Error).message}`);
           event.ended = false;
         }
-        if (event.ended) for (const id of sessions) await this.#index.remove(id);
+        if (event.ended) {
+          for (const id of sessions) {
+            await this.#index.remove(id);
+            try {
+              await this.#options.relyingParty?.removeSession(id);
+            } catch (err) {
+              this.#options.log.error(`ssf: removing the cached tokens of an ended session failed: ${(err as Error).message}`);
+            }
+          }
+        }
       }
       for (const handler of [...(this.#handlers.get(type) ?? []), ...(this.#handlers.get('*') ?? [])]) {
         try {
