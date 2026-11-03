@@ -25,6 +25,7 @@ The application id is the file's `client_id` (`oidc-caep-risc-demo`). The protoc
 | `oauthGrantType` | `authorization_code`, `refresh_token`, `client_credentials` |
 | `oauthAllowedScope` | the file's scopes, the same string oidc-caep-client uses |
 | `oauthTokenEndpointAuthMethod` | `client_secret_basic` |
+| `oauthIdTokenSignedResponseAlg` | `RS256`, the library's default ID token allow-list |
 | `oauthClientSecret` | a new 32-byte secret, only when the application is created |
 
 No browser origin is registered. This client is a server.
