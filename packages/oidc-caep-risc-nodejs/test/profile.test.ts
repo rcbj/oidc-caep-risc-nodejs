@@ -491,8 +491,9 @@ async function startTransmitter() {
         }
         return out(404, { error: 'not_found' });
       })().catch((err: Error) => {
+        console.error(err);
         res.writeHead(500);
-        res.end(err.message);
+        res.end('the stub transmitter failed');
       });
     });
   });
