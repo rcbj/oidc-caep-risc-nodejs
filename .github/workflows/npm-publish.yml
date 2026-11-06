@@ -3,13 +3,14 @@
 # THE VERSION (scripts/version.mjs): M.N from the VERSION file, and a patch
 # number worked out from what is already on npm:
 #   - main publishes a release, M.N.P;
-#   - develop publishes a pre-release of the release that comes next, M.N.P-next.R.
+#   - a pre-release, M.N.P-next.R, is one a person asks for: Run workflow on main,
+#     channel next. npm never resolves a range like ^0.1.0 to a pre-release.
 # The committed package.json says M.N.0; `--set` writes the real version into
 # the workspace copy just before packing.
 #
 # WHEN IT PUBLISHES:
 #   - a push to main publishes a release under the npm dist-tag `latest`;
-#   - a push to develop publishes a pre-release under `next`;
+#   - nothing publishes from develop, so every release tag is on main;
 #   - a pull request builds, tests and packs, and publishes nothing;
 #   - Run workflow publishes on the channel chosen.
 # Only a change to the package, VERSION, the versioner, the lock file or this
@@ -23,7 +24,7 @@ name: Publish the npm package
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - packages/oidc-caep-risc-nodejs/**
       - '!packages/oidc-caep-risc-nodejs/test/**'
@@ -128,7 +129,8 @@ jobs:
 
   publish:
     needs: build
-    if: github.event_name != 'pull_request'
+    # Only from main: the tag this job creates has to be on main.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: npm
