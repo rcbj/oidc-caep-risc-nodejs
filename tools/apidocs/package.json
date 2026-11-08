@@ -7,8 +7,8 @@
     "build": "typedoc --options typedoc.json"
   },
   "dependencies": {
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.6",
     "typedoc": "0.28.20",
-    "typescript": "6.0.3"
+    "typescript": "7.0.2"
   }
 }

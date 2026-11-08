@@ -9,7 +9,7 @@
 # it is mounted at /app/demo/generated (docker-compose.yml). At start, the entrypoint refreshes the
 # chain into the file tlsCa names, unless TLS_CA_REFRESH=0.
 # 24.22.1: the 21 October 2026 security release, which fixes HTTP2Shell / Node2Shell (CVE-2026-111497).
-FROM node:24.22.1-alpine AS build
+FROM node:26.13.0-alpine AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY packages/oidc-caep-risc-nodejs/package.json packages/oidc-caep-risc-nodejs/
@@ -31,7 +31,7 @@ COPY demo/server.ts demo/server.ts
 COPY demo/public demo/public
 RUN npm test
 
-FROM node:24.22.1-alpine
+FROM node:26.13.0-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json ./
