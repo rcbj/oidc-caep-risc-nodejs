@@ -53,7 +53,7 @@
     "node": ">=22.18.0"
   },
   "dependencies": {
-    "jose": "^6.2.12"
+    "jose": "^6.2.15"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
